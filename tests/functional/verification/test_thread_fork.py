@@ -114,3 +114,13 @@ def client_fork_wrong_thread_post(t: Thread, b: bool, cell: Cell) -> None:
     #:: ExpectedOutput(postcondition.violated:insufficient.permission)
     Ensures(Acc(ThreadPost(t)))
     t.start(decr, Cell.incr)
+
+def client_fork_joinable_conjunction(t: Thread, b: bool, cell: Cell) -> None:
+    Requires(Acc(MayStart(t)))
+    Requires(getMethod(t) == decr)
+    Requires(Acc(cell.val))
+    Requires(cell is getArg(t, 0))
+    Ensures(Joinable(t) and Acc(ThreadPost(t)))
+    #:: ExpectedOutput(postcondition.violated:assertion.false)
+    Ensures(Joinable(t) and False)
+    t.start(decr, Cell.incr)
