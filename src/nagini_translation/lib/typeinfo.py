@@ -60,6 +60,18 @@ def absolute_import_id(importer: 'mypy.nodes.MypyFile', imp) -> str:
     return '.'.join(parts)
 
 
+def coroutine_result_type(type: mypy.types.Type) -> mypy.types.Type:
+    """
+    mypy gives an ``async def`` declared to return ``T`` the return type
+    ``Coroutine[Any, Any, T]``. Returns ``T`` for such a type, and the type
+    itself otherwise.
+    """
+    if (isinstance(type, mypy.types.Instance) and
+            type.type.fullname == 'typing.Coroutine' and len(type.args) == 3):
+        return type.args[2]
+    return type
+
+
 class TypeVisitor(TraverserVisitor):
     def __init__(self, type_map, path, ignored_lines, real_path):
         self.prefix = []
@@ -176,6 +188,9 @@ class TypeVisitor(TraverserVisitor):
         oldprefix = self.prefix
         self.prefix = self.prefix + [node.name]
         functype = self.type_of(node)
+        if node.is_coroutine and isinstance(functype, mypy.types.CallableType):
+            functype = functype.copy_modified(
+                ret_type=coroutine_result_type(functype.ret_type))
         self.set_type(self.prefix, functype, node.line, col(node), True)
         for arg in node.arguments:
             self.set_type(self.prefix + [arg.variable.name],

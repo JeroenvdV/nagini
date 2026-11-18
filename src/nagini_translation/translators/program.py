@@ -1378,6 +1378,11 @@ class ProgramTranslator(CommonTranslator):
                     if module is not module.global_module:
                         all_names.append(method.sil_name)
                     self.translate_default_args(method, ctx)
+                    if method.is_async:
+                        ctx.async_methods.append(method)
+                if isinstance(container, PythonClass):
+                    ctx.async_methods.extend(m for m in container.static_methods.values()
+                                             if m.is_async)
                 for pred in container.predicates.values():
                     if module is not module.global_module:
                         all_names.append(pred.sil_name)

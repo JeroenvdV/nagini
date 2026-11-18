@@ -158,6 +158,7 @@ class PythonModule(PythonScope, ContainerInterface, PythonStatementContainer):
         self.io_operations = OrderedDict()
         self.global_vars = OrderedDict()
         self.namespaces = OrderedDict()
+        self.asyncio_aliases = {}
         self.global_module = global_module
         self.type_prefix = type_prefix
         self.from_imports = []
@@ -1129,6 +1130,7 @@ class PythonMethod(PythonNode, PythonScope, ContainerInterface, PythonStatementC
         self.opaque = opaque
         self.predicate = False
         self.inline = False
+        self.is_async = isinstance(node, ast.AsyncFunctionDef)
         self.all_low = False
         self.preserves_low = False
         self.contract_only = contract_only
@@ -1194,6 +1196,9 @@ class PythonMethod(PythonNode, PythonScope, ContainerInterface, PythonStatementC
                     if self.inline:
                         raise InvalidProgramException(self.node, 'overriding.inline.method',
                                                       'Functions marked to be inlined cannot override other methods.')
+                    if getattr(self.overrides, 'is_async', False) != self.is_async:
+                        raise InvalidProgramException(self.node, 'overriding.async.mismatch',
+                                                      'Async and non-async methods cannot override each other.')
             except KeyError:
                 pass
         for local in self.locals:

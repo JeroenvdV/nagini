@@ -11,7 +11,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 
 from typing import Union
-from nagini_contracts.thread import Thread
+from nagini_contracts.thread import ThreadOrTask
 
 
 OBLIGATION_CONTRACT_FUNCS = [
@@ -37,7 +37,7 @@ def WaitLevel() -> LevelType:
     """The wait level of the current thread."""
 
 
-def Level(l: Union[BaseLock, Thread]) -> LevelType:
+def Level(l: Union[BaseLock, ThreadOrTask]) -> LevelType:
     """Level of the given lock or thread."""
 
 

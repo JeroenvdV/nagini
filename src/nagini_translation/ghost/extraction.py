@@ -208,7 +208,13 @@ class ProgramExtractor:
             new_returns = node.returns.slice.elts[0]
 
 
+        if isinstance(node, ast.AsyncFunctionDef):
+            return ast.AsyncFunctionDef(node.name, new_arguments, new_body,
+                                        new_decorator_list, new_returns)
         return ast.FunctionDef(node.name, new_arguments, new_body, new_decorator_list, new_returns)
+
+    def extract_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Optional[ast.AST]:
+        return self.extract_FunctionDef(node)
 
     def extract_Assign(self, node: ast.Assign) -> ast.AST:
         new_targets: List[ast.expr] = []

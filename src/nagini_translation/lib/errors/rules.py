@@ -108,6 +108,30 @@ THREAD_JOIN_JOINABLE = {
     ('assert.failed', 'assertion.false'):
         ('thread.join.failed', 'thread.not.joinable')
 }
+TASK_CREATION_ARG_TYPE = {
+    ('assert.failed', 'assertion.false'):
+        ('task.creation.failed', 'invalid.argument.type')
+}
+TASK_CREATION_PRECONDITION = {
+    ('exhale.failed', 'insufficient.permission'):
+        ('task.creation.failed', 'insufficient.permission'),
+    ('inhale.failed', 'insufficient.permission'):
+        ('task.creation.failed', 'insufficient.permission'),
+    ('exhale.failed', 'assertion.false'):
+        ('task.creation.failed', 'assertion.false')
+}
+TASK_AWAIT_WAITLEVEL = {
+    ('assert.failed', 'assertion.false'):
+        ('await.failed', 'wait.level.invalid')
+}
+TASK_AWAIT_JOINABLE = {
+    ('assert.failed', 'assertion.false'):
+        ('await.failed', 'task.not.joinable')
+}
+AWAIT_LOCK_HELD = {
+    ('assert.failed', 'assertion.false'):
+        ('await.failed', 'lock.held')
+}
 INHALE_TO_CALL = {
     ('inhale.failed', 'insufficient.permission'):
         ('call.precondition', 'insufficient.permission')

@@ -5,7 +5,8 @@ License, v. 2.0. If a copy of the MPL was not distributed with this
 file, You can obtain one at http://mozilla.org/MPL/2.0/.
 """
 
-from typing import Callable, Tuple, Any
+from asyncio import Task
+from typing import Callable, Tuple, Any, Union
 
 
 class Thread:
@@ -35,12 +36,15 @@ class Thread:
         pass
 
 
-def getMethod(t: Thread) -> Callable:
+ThreadOrTask = Union[Thread, 'Task[Any]']
+
+
+def getMethod(t: ThreadOrTask) -> Callable:
     """Return the target method of a thread."""
     pass
 
 
-def getArg(t: Thread, i: int) -> object:
+def getArg(t: ThreadOrTask, i: int) -> object:
     """
     Return the ith element passed to the thread constructor in the ``args`` parameter,
     unless the thread target passed to the constructor contained a receiver object, in
@@ -53,7 +57,7 @@ def getArg(t: Thread, i: int) -> object:
     pass
 
 
-def getOld(t: Thread, o: object) -> object:
+def getOld(t: ThreadOrTask, o: object) -> object:
     """
     Return the value of expression o when thread t was started.
     o must be an expression mentioned in an old-expression in the postcondition of the
@@ -63,7 +67,7 @@ def getOld(t: Thread, o: object) -> object:
     pass
 
 
-def getARP(t: Thread) -> float:
+def getARP(t: ThreadOrTask) -> float:
     """
     Returns the permission value of abstract read permissions passed to thread t.
     """
@@ -75,7 +79,7 @@ def arg(i: int) -> Any:
     pass
 
 
-def Joinable(t: Thread) -> bool:
+def Joinable(t: ThreadOrTask) -> bool:
     """
     Represents that thread t is joinable.
     Threads may be joined if they promise to terminate.
@@ -83,12 +87,12 @@ def Joinable(t: Thread) -> bool:
     pass
 
 
-def MayStart(t: Thread) -> bool:
+def MayStart(t: ThreadOrTask) -> bool:
     """A permission to start a newly created thread. Can only be used once."""
     pass
 
 
-def ThreadPost(t: Thread) -> bool:
+def ThreadPost(t: ThreadOrTask) -> bool:
     """
     A permission to get the postcondition of thread t after joining it.
     If only a fractional amount of permission to ThreadPost(t) is held when joining,

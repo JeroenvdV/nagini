@@ -354,6 +354,10 @@ class StatementTranslator(CommonTranslator):
         dep_check = self._check_dependencies_defined(method, node, ctx)
         return dep_check + [self.set_global_defined(method, ctx.module, node, ctx)]
 
+    def translate_stmt_AsyncFunctionDef(self, node: ast.AsyncFunctionDef,
+                                        ctx: Context) -> List[Stmt]:
+        return self.translate_stmt_FunctionDef(node, ctx)
+
     def translate_stmt_ClassDef(self, node: ast.ClassDef, ctx: Context) -> List[Stmt]:
         """
         Class definitions in the global method are translated to 1) a check that
@@ -1060,6 +1064,16 @@ class StatementTranslator(CommonTranslator):
                                                                self.translator)
                 assign = self.viper.LocalVarAssign(res_var.ref(), val, pos, info)
                 stmt.append(assign)
+            return stmt
+        elif isinstance(node.value, ast.Await):
+            stmt, val = self.translate_Await(node.value, ctx, statement=True)
+            res_type = self.get_type(node.value, ctx)
+            if val is not None and res_type is not None:
+                pos = self.to_position(node, ctx)
+                info = self.no_info(ctx)
+                res_var = ctx.current_function.create_variable('expr_res', res_type,
+                                                               self.translator)
+                stmt.append(self.viper.LocalVarAssign(res_var.ref(), val, pos, info))
             return stmt
         elif isStr(node.value) or isEllipsis(node.value):
             # Docstring or ellipsis, just skip.

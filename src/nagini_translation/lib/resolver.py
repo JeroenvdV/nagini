@@ -29,6 +29,7 @@ from nagini_translation.lib.constants import (
     RANGE_TYPE,
     SET_TYPE,
     STRING_TYPE,
+    TASK_TYPE,
     TUPLE_TYPE,
     TYPE_TYPE,
 )
@@ -58,6 +59,37 @@ from nagini_translation.lib.util import (
     UnsupportedException,
 )
 from typing import List, Optional
+
+
+def get_asyncio_function(node: ast.AST, module: PythonModule) -> Optional[str]:
+    """
+    If ``node`` is a call of a function from the asyncio module (either via
+    ``asyncio.f(...)`` or via a name imported with ``from asyncio import f``),
+    returns the name of that function, otherwise None.
+    """
+    if not isinstance(node, ast.Call) or module is None:
+        return None
+    aliases = module.asyncio_aliases
+    func = node.func
+    if isinstance(func, ast.Name) and aliases.get(func.id):
+        return aliases[func.id]
+    if (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and
+            aliases.get(func.value.id) == ''):
+        return func.attr
+    return None
+
+
+def is_asyncio_call(node: ast.AST, name: str, container: PythonNode) -> bool:
+    """
+    Checks if ``node`` is a call of the asyncio function with the given name.
+    """
+    return get_asyncio_function(node, _module_of(container)) == name
+
+
+def _module_of(container: PythonNode) -> Optional[PythonModule]:
+    if isinstance(container, PythonModule):
+        return container
+    return getattr(container, 'module', None)
 
 
 def get_target(node: ast.AST,
@@ -214,11 +246,40 @@ def get_type(node: ast.AST, containers: List[ContainerInterface],
     return result
 
 
+def _get_await_type(node: ast.Await, containers: List[ContainerInterface],
+                    container: PythonNode) -> Optional[PythonType]:
+    """
+    Returns the type of an await expression, i.e., the result type of the
+    awaited coroutine or task.
+    """
+    if is_asyncio_call(node.value, 'sleep', container):
+        return None
+    target = get_target(node.value, containers, container)
+    if isinstance(target, PythonMethod) and target.type is None:
+        return None
+    awaited = _do_get_type(node.value, containers, container)
+    if (isinstance(awaited, GenericType) and awaited.name == TASK_TYPE and
+            awaited.type_args):
+        return awaited.type_args[0]
+    return awaited
+
+
 def _do_get_type(node: ast.AST, containers: List[ContainerInterface],
                  container: PythonNode) -> Optional[PythonType]:
     """
     Does the actual work for get_type without boxing the type.
     """
+    if isinstance(node, ast.Await):
+        return _get_await_type(node, containers, container)
+    if is_asyncio_call(node, 'run', container) and node.args:
+        return _do_get_type(node.args[0], containers, container)
+    if is_asyncio_call(node, 'create_task', container) and node.args:
+        module = _module_of(container)
+        task_class = module.global_module.classes[TASK_TYPE]
+        result_type = _get_await_type(ast.Await(node.args[0]), containers, container)
+        if result_type is None:
+            result_type = module.global_module.classes['NoneType']
+        return GenericType(task_class, [result_type])
     if isinstance(container, (PythonIOOperation, PythonMethod)):
         module = container.module
         current_function = container

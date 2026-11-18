@@ -249,7 +249,10 @@ class GhostChecker(ast.NodeVisitor):
         node.is_ghost = current_class.is_ghost
         self.set_contains_ghost(node, current_class.is_ghost, *node.body)
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.visit_FunctionDef(node)
+
+    def visit_FunctionDef(self, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> None:
         decorators = {d.id for d in node.decorator_list if isinstance(d, ast.Name)}
         if any([dec in SPEC_ONLY_DECORATORS for dec in decorators]):
             # Predicates and IO operations only exist during verification, so
@@ -728,6 +731,9 @@ class GhostChecker(ast.NodeVisitor):
         elif isinstance(ann, ast.Attribute):
             # Must be valid or mypy would throw error. Either module.Class or,
             # for a nested class, Class.Nested.
+            if (isinstance(ann.value, ast.Name) and
+                    self.current_module.asyncio_aliases.get(ann.value.id) == ''):
+                return False
             target: Optional[PythonNode] = self.get_target(ann.value, self.ctx)
             if isinstance(target, PythonModule):
                 return (ann.attr in target.ghost_names or

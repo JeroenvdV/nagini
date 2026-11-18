@@ -59,6 +59,8 @@ class Context:
         # True iff contracts for a thread start are translated.
         # Used to differentiate fresh token from old token permission.
         self.is_thread_start = False
+        self.awaited_call = None
+        self.async_methods = []
         self.are_function_constants_used = False
         self.are_threading_constants_used = False
         self.sif = False

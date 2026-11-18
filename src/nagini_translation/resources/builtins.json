@@ -1151,6 +1151,10 @@
 "Thread": {
     "extends": "object"
 },
+"Task": {
+    "extends": "Thread",
+    "type_vars": 1
+},
 "LevelType": {
 },
 "Callable": {
