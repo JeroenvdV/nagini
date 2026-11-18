@@ -1584,7 +1584,7 @@ class CallTranslator(CommonTranslator):
             func_equal = self.viper.EqCmp(arg_func, arg_val, pos, info)
             arg_assumptions = self.viper.And(arg_assumptions, func_equal, pos, info)
             arg_type_check = self.type_check(arg_val, method_args[i].type, pos, ctx)
-            arg_type_checks = self.viper.EqCmp(arg_type_checks, arg_type_check, pos, info)
+            arg_type_checks = self.viper.And(arg_type_checks, arg_type_check, pos, info)
 
         method_id_type = self.viper.DomainType(METHOD_ID_DOMAIN, {}, [])
         thread_method = self.viper.DomainFuncApp(GET_METHOD_FUNC, [thread],
