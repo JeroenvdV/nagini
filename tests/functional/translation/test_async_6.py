@@ -10,5 +10,5 @@ async def f() -> int:
 
 
 async def g() -> None:
-    #:: ExpectedOutput(unsupported:Unsupported asyncio function: gather)
-    await asyncio.gather(f(), f())
+    #:: ExpectedOutput(unsupported:Unsupported asyncio function: wait_for)
+    await asyncio.wait_for(f(), 1)

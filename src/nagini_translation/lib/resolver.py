@@ -280,6 +280,15 @@ def _do_get_type(node: ast.AST, containers: List[ContainerInterface],
         if result_type is None:
             result_type = module.global_module.classes['NoneType']
         return GenericType(task_class, [result_type])
+    if is_asyncio_call(node, 'gather', container) and node.args:
+        module = _module_of(container)
+        result_types = []
+        for arg in node.args:
+            result_type = _get_await_type(ast.Await(arg), containers, container)
+            if result_type is None:
+                result_type = module.global_module.classes['NoneType']
+            result_types.append(result_type)
+        return GenericType(module.global_module.classes[TUPLE_TYPE], result_types)
     if isinstance(container, (PythonIOOperation, PythonMethod)):
         module = container.module
         current_function = container
