@@ -79,8 +79,9 @@ async def await_twice() -> None:
     x = await t
     y = await t
     assert x == 6
-    #:: ExpectedOutput(assert.failed:assertion.false)
     assert y == 6
+    #:: ExpectedOutput(assert.failed:assertion.false)
+    assert y == 7
 
 
 async def not_terminating() -> None:

@@ -224,6 +224,14 @@ class GhostChecker(ast.NodeVisitor):
             sub_node.is_ghost = True
             sub_node.contains_ghost = True
 
+    def mark_regular(self, node: ast.AST) -> None:
+        """
+        Marks the entire subtree rooted in the given node as regular code.
+        """
+        for sub_node in ast.walk(node):
+            sub_node.is_ghost = False
+            sub_node.contains_ghost = False
+
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         # A nested class is a member of the enclosing class, not of the module.
         container = self.ctx.current_class if self.ctx.current_class else self.current_module
@@ -331,9 +339,11 @@ class GhostChecker(ast.NodeVisitor):
             contains_ghost = True
 
         if contract_only:
-            # The body consists of specifications only.
             for stmt in node.body:
-                self.mark_ghost(stmt)
+                if isinstance(stmt, ast.Raise):
+                    self.mark_regular(stmt)
+                else:
+                    self.mark_ghost(stmt)
         else:
             for stmt in node.body:
                 self.visit(stmt)
@@ -742,6 +752,13 @@ class GhostChecker(ast.NodeVisitor):
                 return self.is_ghost_type(target.classes.get(ann.attr))
             raise InvalidProgramException(ann, 'invalid.ghost.annotation',
                                           "Couldn't correctly resolve module of annotation.")
+        elif isinstance(ann, ast.BinOp) and isinstance(ann.op, ast.BitOr):
+            members = [m for m in (ann.left, ann.right)
+                       if not (isinstance(m, ast.Constant) and m.value is None)]
+            results = {self.check_annotation(m) for m in members}
+            if len(results) > 1:
+                raise InvalidProgramException(ann, 'invalid.ghost.annotation')
+            return results.pop() if results else False
         else:
             assert isinstance(ann, ast.Subscript), f"Unexpected type of {type(ann)}"
             # A generic ghost type, e.g. PSeq[int], is ghost no matter what its

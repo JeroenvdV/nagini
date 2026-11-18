@@ -18,6 +18,18 @@ async def count(n: int, seen: GInt) -> int:
     return i
 
 
+class Repo:
+    @ContractOnly
+    async def find(self, key: int) -> int:
+        Ensures(Result() >= 0)
+        raise NotImplementedError()
+
+
+async def lookup(r: Repo, key: int) -> int:
+    Ensures(Result() >= 0)
+    return await r.find(key)
+
+
 async def main() -> int:
     g: GInt = 3
     return await count(3, g)

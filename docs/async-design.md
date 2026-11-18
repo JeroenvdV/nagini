@@ -66,7 +66,8 @@ Additional checks specific to asyncio:
 - **Cancellation is not modelled.** Tasks still pending when the main coroutine
   returns get `CancelledError` at their `await` points. Code that only runs on
   that path, such as `finally` blocks or error handlers, is not verified, and
-  nothing enforces that every task is awaited.
+  nothing enforces that every task is awaited: a task that is never awaited
+  verifies without a warning.
 - **Termination assumes fair cooperative scheduling.** A task that loops
   without awaiting starves the others. `sleep` and awaits of coroutines assume
   that the event loop eventually resumes the current task.
@@ -93,7 +94,9 @@ Additional checks specific to asyncio:
 - Awaiting a task of unknown origin considers every eligible async method in
   the program as its possible target, so the Viper code grows with the program
   size times the number of task awaits.
-- Awaiting the same task twice returns a value about which nothing is known.
+- Awaiting the same task twice returns the same result (the result is
+  `getResult(t)`, a function of the task), but the second await does not
+  obtain the postcondition again.
 
 ### Testing gaps
 
@@ -102,8 +105,7 @@ Additional checks specific to asyncio:
   rejected there, like threads.
 - Not tested together with I/O contracts or with `--functional-product`.
 - `await` inside contracts, lambdas or comprehensions, `await` in ghost code,
-  `@ContractOnly` async functions, and awaiting calls on receivers of union
-  type are untested.
+  and awaiting calls on receivers of union type are untested.
 
 ## Changed files
 
@@ -122,6 +124,12 @@ Additional checks specific to asyncio:
 - `nagini_contracts/thread.py` and `obligations.py`: thread contract functions
   and `Level` accept `asyncio.Task`.
 - `models/converter.py`: counterexamples for tuples with `None` elements.
+- `ghost/ghost_checker.py`: `raise` statements in `@ContractOnly` bodies are
+  kept by `--extraction`; `X | Y` annotations are supported.
+- `translators/program.py`: module-level code is verified when the program
+  defines a function named `main`.
+- `translators/expression.py`: calls of functions returning `None` can be used
+  as expressions, e.g. `return f()`.
 - Small `FunctionDef` → `FunctionDef | AsyncFunctionDef` generalisations in the
   ghost checker, extraction, statement translator, error messages and utilities.
 - Tests: `tests/functional/verification/test_async*.py`,

@@ -109,8 +109,8 @@ async def finish(t: Task[int], c: Cell) -> int:
 Awaiting a task requires `Joinable(t)` (the task terminates) and
 `WaitLevel() < Level(t)`, exactly like `Thread.join`. If some permission to
 `ThreadPost(t)` is held, that fraction of the coroutine's postcondition is
-obtained and the permission is consumed; awaiting the same task again returns a
-value about which nothing is known. Task coroutines must not be class methods,
+obtained and the permission is consumed. Awaiting the same task again returns
+the same result, but its postcondition is not obtained again. Task coroutines must not be class methods,
 must not declare exceptions (an exception in a task is re-raised when it is
 awaited), and their postconditions must not mention `WaitLevel()`.
 
@@ -158,6 +158,13 @@ task that tries to acquire the lock would block the whole event loop thread, so
 the lock could never be released. Nagini checks this at every `await` and
 reports `Await may fail. A lock might be held while suspending the current
 task.`
+
+## Interfaces
+
+`@ContractOnly` async functions and methods can be used as interfaces that are
+implemented in unverified code. Their body is not verified, and `--extraction`
+removes everything except `raise` statements, so a body such as
+`raise NotImplementedError()` is kept in the extracted program.
 
 ## Not supported
 

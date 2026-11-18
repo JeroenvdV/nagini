@@ -6,6 +6,14 @@
 
 - **async/await**: `async def` functions and methods can now be verified. Awaiting a call of an async function is verified like an ordinary call: the callee's precondition is exhaled and its postcondition inhaled, and all other permissions stay with the caller. `asyncio.run` (in module-level code), `await asyncio.sleep(...)`, tasks created with `asyncio.create_task`, and `await asyncio.gather(...)` of coroutine calls are supported. Tasks are encoded like threads that are started immediately: the task owns the permissions in its coroutine's precondition, and awaiting it works like joining a thread, additionally returning the coroutine's result. `gather` is encoded like creating a task for each coroutine and then awaiting all of them, and returns the tuple of results. The contract functions from `nagini_contracts.thread` and `Level` accept tasks. Holding a lock while a task may be suspended is reported as an error, since it may deadlock the event loop. Coroutine objects that are not awaited directly, `async for`, `async with`, and other `asyncio` functions are reported as unsupported. See [docs/async.md](docs/async.md) and [docs/async-design.md](docs/async-design.md).
 
+### Bug fixes
+
+- Module-level code was not verified when the program defined a function named `main`, e.g. for `asyncio.run(main())`.
+- Annotations using the `X | Y` union syntax crashed Nagini.
+- `return f()` for a function `f` returning `None` crashed Nagini.
+- `--extraction` removed `raise` statements from `@ContractOnly` functions.
+- Counterexamples for tuples with `None` elements crashed Nagini.
+
 ---
 
 ## v1.3.1 (July 2026)

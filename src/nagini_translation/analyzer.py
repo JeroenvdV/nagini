@@ -881,17 +881,26 @@ class Analyzer(ast.NodeVisitor):
         decorators = {d.id for d in node.decorator_list if isinstance(d, ast.Name)}
         illegal = decorators & ASYNC_INCOMPATIBLE_DECORATORS
         if illegal or any(isinstance(d, ast.Attribute) for d in node.decorator_list):
-            raise InvalidProgramException(node, 'async.decorator.unsupported')
+            raise InvalidProgramException(node, 'async.decorator.unsupported',
+                                          'Async functions cannot be pure, opaque, '
+                                          'predicates, inlined, IO operations, '
+                                          'properties or ghost functions.')
         if node.name.startswith('__') and node.name.endswith('__'):
-            raise InvalidProgramException(node, 'async.magic.method')
+            raise InvalidProgramException(node, 'async.magic.method',
+                                          'Magic methods such as __aenter__ cannot be '
+                                          'async.')
         if self.current_class is not None and self.current_class.is_ghost:
-            raise InvalidProgramException(node, 'async.decorator.unsupported')
+            raise InvalidProgramException(node, 'async.decorator.unsupported',
+                                          'Ghost classes cannot contain async methods.')
+        if any(isinstance(n, (ast.Yield, ast.YieldFrom)) for n in ast.walk(node)):
+            raise UnsupportedException(node, 'async generators')
         self.visit_FunctionDef(node)
 
     def visit_Await(self, node: ast.Await) -> None:
         func = self.current_function
         if func is None or not func.is_async:
-            raise InvalidProgramException(node, 'await.outside.async')
+            raise InvalidProgramException(node, 'await.outside.async',
+                                          'await can only be used in async functions.')
         self.visit_default(node)
 
     def visit_AsyncFor(self, node: ast.AsyncFor) -> None:

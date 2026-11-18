@@ -26,6 +26,7 @@ from nagini_translation.lib.constants import (
     ERROR_NAME,
     GET_ARG_FUNC,
     GET_METHOD_FUNC,
+    GET_RESULT_FUNC,
     GET_OLD_FUNC,
     INT_TYPE,
     JOINABLE_FUNC,
@@ -1562,7 +1563,9 @@ class CallTranslator(CommonTranslator):
         never execute inside an event loop.
         """
         if ctx.current_function is not None and not self.is_main_method(ctx):
-            raise InvalidProgramException(node, 'asyncio.run.not.toplevel')
+            raise InvalidProgramException(node, 'asyncio.run.not.toplevel',
+                                          'asyncio.run can only be used in '
+                                          'module-level code.')
         if len(node.args) != 1 or node.keywords:
             raise UnsupportedException(node, 'asyncio.run with arguments other than '
                                              'a single coroutine')
@@ -1586,7 +1589,9 @@ class CallTranslator(CommonTranslator):
         if ctx.sif is True:
             raise InvalidProgramException(node, 'concurrency.in.sif')
         if not (ctx.actual_function and ctx.actual_function.is_async):
-            raise InvalidProgramException(node, 'asyncio.create_task.outside.async')
+            raise InvalidProgramException(node, 'asyncio.create_task.outside.async',
+                                          'asyncio.create_task can only be used '
+                                          'in async functions.')
         if len(node.args) != 1 or node.keywords:
             raise UnsupportedException(node, 'asyncio.create_task with arguments other '
                                              'than a single coroutine')
@@ -1717,6 +1722,10 @@ class CallTranslator(CommonTranslator):
         res_var = ctx.current_function.create_variable('await_result',
                                                       result_type or object_class,
                                                       self.translator)
+        task_result = self.viper.DomainFuncApp(GET_RESULT_FUNC, [task], self.viper.Ref,
+                                               pos, info, THREAD_DOMAIN)
+        stmts.append(self.viper.LocalVarAssign(res_var.ref(node, ctx), task_result, pos,
+                                               info))
         if result_type is not None:
             result_type_check = self.type_check(res_var.ref(node, ctx), result_type, pos,
                                                 ctx)
