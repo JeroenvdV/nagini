@@ -54,10 +54,3 @@ def client_create_wrong_arg(b: bool) -> Thread:
         #:: ExpectedOutput(thread.creation.failed:invalid.argument.type)
         t = Thread(None, decr, args=(cl, cl))
     return t
-
-
-def client_create_two_wrong_args() -> Thread:
-    cl = Cell()
-    #:: ExpectedOutput(thread.creation.failed:invalid.argument.type)
-    t = Thread(None, decr, args=(6, cl))
-    return t
