@@ -54,3 +54,18 @@ def client_create_wrong_arg(b: bool) -> Thread:
         #:: ExpectedOutput(thread.creation.failed:invalid.argument.type)
         t = Thread(None, decr, args=(cl, cl))
     return t
+
+
+def client_create_may_start_conjunction() -> Thread:
+    Ensures(MayStart(Result()) and getMethod(Result()) == decr)
+    cl = Cell()
+    t = Thread(None, decr, args=(cl, 6))
+    return t
+
+
+def client_create_may_start_conjunction_wrong() -> Thread:
+    #:: ExpectedOutput(postcondition.violated:assertion.false)
+    Ensures(MayStart(Result()) and getArg(Result(), 1) is 7)
+    cl = Cell()
+    t = Thread(None, decr, args=(cl, 6))
+    return t
