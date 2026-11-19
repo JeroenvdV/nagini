@@ -346,6 +346,7 @@ class TypeInfo:
         self.type_vars = {}
         self.ghost_names = {}
         self.module_name = None
+        self.non_module_names = {}
 
     def _create_options(self, strict_optional: bool):
         """
@@ -423,7 +424,11 @@ class TypeInfo:
                                 # which case ii.id is not the name mypy asks
                                 # about later ('A' rather than 'pkg.A'), so the
                                 # module would keep its cached, stripped tree.
-                                ids.append(absolute_import_id(importer, ii))
+                                imported_from = absolute_import_id(importer, ii)
+                                ids.append(imported_from)
+                                if isinstance(ii, mypy.nodes.ImportFrom):
+                                    ids.extend(imported_from + '.' + name
+                                               for name, _ in ii.names)
                             for imported_id in ids:
                                 if imported_id not in IGNORED_IMPORTS:
                                     imports_not_handled.add(imported_id)
@@ -470,6 +475,9 @@ class TypeInfo:
                     real_name = name.split('.')
                     name = '__main__'
                 self.files[name] = file.path
+                self.non_module_names[name] = {
+                    symbol for symbol, node in file.names.items()
+                    if not isinstance(node.node, mypy.nodes.MypyFile)}
                 visitor = TypeVisitor(res_strict.types, name,
                                       file.ignored_lines, real_name)
                 visitor.prefix = name.split('.')
@@ -487,6 +495,17 @@ class TypeInfo:
             # installed by the previous one, and looking up a single cache entry
             # would recurse through all of them.
             mypy.build.find_cache_meta = old_find_cache_meta
+
+    def is_submodule_import(self, module_name: str, name: str) -> bool:
+        """
+        Returns whether ``from <module_name> import <name>`` imports a submodule
+        rather than a name defined in the module.
+        """
+        if module_name + '.' + name not in self.files:
+            return False
+        if module_name not in self.files:
+            module_name = '__main__'
+        return name not in self.non_module_names.get(module_name, set())
 
     def get_type_prefix(self, name: str) -> str:
         name = os.path.abspath(name)

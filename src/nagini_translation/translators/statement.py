@@ -213,6 +213,18 @@ class StatementTranslator(CommonTranslator):
         info = self.no_info(ctx)
         imported_module = ctx.module.get_relative_import_name(node.module, node.level)
 
+        names = []
+        for alias in node.names:
+            as_name = alias.asname if alias.asname else alias.name
+            submodule = ctx.module.namespaces.get(as_name)
+            if (submodule is not None and
+                    submodule.type_prefix == imported_module + '.' + alias.name):
+                stmts.extend(self._import_module(submodule, [as_name], node, ctx))
+            else:
+                names.append(alias)
+        if not names:
+            return stmts
+
         for imported in ctx.module.from_imports:
             if not isinstance(imported, PythonModule):
                 imported = imported.original_module
@@ -229,7 +241,7 @@ class StatementTranslator(CommonTranslator):
         import_all = False
         imported_names = []
 
-        if len(node.names) == 1 and node.names[0].name == '*':
+        if len(names) == 1 and names[0].name == '*':
             if node.module not in IGNORED_IMPORTS:
                 import_all = True
             else:
@@ -237,7 +249,7 @@ class StatementTranslator(CommonTranslator):
 
         else:
             imported_names.extend([(n.name, n.asname if n.asname else n.name)
-                                   for n in node.names])
+                                   for n in names])
 
         if import_all:
             union = self.viper.AnySetUnion(ctx.module.names_var[1], mod.names_var[1],
@@ -288,8 +300,6 @@ class StatementTranslator(CommonTranslator):
         if not self.is_main_method(ctx):
             raise InvalidProgramException(node, 'local.import')
         stmts = []
-        pos = self.to_position(node, ctx)
-        info = self.no_info(ctx)
         for name in node.names:
             if name.name in IGNORED_IMPORTS:
                 continue
@@ -298,39 +308,55 @@ class StatementTranslator(CommonTranslator):
             mod = ctx.module
             for part in name_parts:
                 mod = mod.namespaces[part]
-            module_set_type = SilverType(self.viper.SetType(self.name_type()), ctx.module)
-            new_set_var = ctx.current_function.create_variable('new_set',
-                                                               module_set_type,
-                                                               self.translator)
-            stmts.append(self._execute_module_statements(mod, node, ctx))
-            name_var_decl = self.viper.LocalVarDecl(NAME_QUANTIFIER_VAR, self.name_type(),
-                                                    pos, info)
-            name_var_ref = self.viper.LocalVar(NAME_QUANTIFIER_VAR, self.name_type(), pos,
-                                               info)
-            name_in_imported = self._is_defined(name_var_ref, mod.names_var[1], pos, info)
+            stmts.extend(self._import_module(mod, name_parts, node, ctx))
+        return stmts
+
+    def _import_module(self, mod: PythonModule, name_parts: List[str],
+                       node: Union[ast.Import, ast.ImportFrom], ctx: Context) -> List[Stmt]:
+        """
+        Executes the statements of the given module if it has not been imported
+        before, and adds all its names, prefixed with the given name parts, to the
+        current module.
+        """
+        stmts = []
+        pos = self.to_position(node, ctx)
+        info = self.no_info(ctx)
+        module_set_type = SilverType(self.viper.SetType(self.name_type()), ctx.module)
+        new_set_var = ctx.current_function.create_variable('new_set',
+                                                           module_set_type,
+                                                           self.translator)
+        stmts.append(self._execute_module_statements(mod, node, ctx))
+        name_var_decl = self.viper.LocalVarDecl(NAME_QUANTIFIER_VAR, self.name_type(),
+                                                pos, info)
+        name_var_ref = self.viper.LocalVar(NAME_QUANTIFIER_VAR, self.name_type(), pos,
+                                           info)
+        name_in_imported = self._is_defined(name_var_ref, mod.names_var[1], pos, info)
 
 
-            combined_name = name_var_ref
-            last_part = name_var_ref
-            name_ints = []
-            for name in reversed(name_parts):
-                name_int = self.viper.IntLit(self._get_string_value(name), pos, info)
-                combined_name = self._combine_names(name_int, combined_name, pos, info)
-                last_part = self._get_name_from_combined(last_part, pos, info)
-                name_ints.append(name_int)
-            combined_part = last_part
-            for name_int in name_ints:
-                combined_part = self._combine_names(name_int, combined_part, pos, info)
-            combined_in_new = self._is_defined(combined_name, new_set_var.ref(), pos,
-                                               info)
-            impl = self.viper.EqCmp(name_in_imported, combined_in_new, pos, info)
-            trigger = self.viper.Trigger([combined_in_new], pos, info)
-            assertion = self.viper.Forall([name_var_decl], [trigger], impl, pos, info)
-            stmts.append(self.viper.Inhale(assertion, pos, info))
-            union = self.viper.AnySetUnion(ctx.module.names_var[1], new_set_var.ref(),
-                                           pos, info)
-            stmts.append(self.viper.LocalVarAssign(ctx.module.names_var[1], union, pos,
-                                                   info))
+        combined_name = name_var_ref
+        last_part = name_var_ref
+        name_ints = []
+        for name in reversed(name_parts):
+            name_int = self.viper.IntLit(self._get_string_value(name), pos, info)
+            combined_name = self._combine_names(name_int, combined_name, pos, info)
+            last_part = self._get_name_from_combined(last_part, pos, info)
+            name_ints.append(name_int)
+        combined_part = last_part
+        for name_int in name_ints:
+            combined_part = self._combine_names(name_int, combined_part, pos, info)
+        combined_in_new = self._is_defined(combined_name, new_set_var.ref(), pos,
+                                           info)
+        impl = self.viper.EqCmp(name_in_imported, combined_in_new, pos, info)
+        trigger = self.viper.Trigger([combined_in_new], pos, info)
+        assertion = self.viper.Forall([name_var_decl], [trigger], impl, pos, info)
+        stmts.append(self.viper.Inhale(assertion, pos, info))
+        union = self.viper.AnySetUnion(ctx.module.names_var[1], new_set_var.ref(),
+                                       pos, info)
+        stmts.append(self.viper.LocalVarAssign(ctx.module.names_var[1], union, pos,
+                                               info))
+        bound_name = self.viper.IntLit(self._get_string_value(name_parts[0]), pos, info)
+        stmts.append(self._set_global_defined(bound_name, ctx.module.names_var[1], pos,
+                                              info))
         return stmts
 
     def translate_stmt_FunctionDef(self, node: ast.FunctionDef,

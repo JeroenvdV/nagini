@@ -18,6 +18,7 @@
 - A builtin exception class other than `Exception` in `Exsures` crashed Nagini; it is now reported as unsupported.
 - `--extraction` kept imports which only the removed specifications used.
 - Relative imports between verified modules failed unless `--base-dir` was given. If it is not given, it now defaults to the directory containing the outermost package of the verified file. Verifying the `__init__.py` of a package with a base directory failed as well.
+- Importing a submodule with `from pkg import mod` or `from . import mod` crashed Nagini or was reported as unsupported when the module was used, e.g. `mod.f()`. Names bound by a module import can now also be imported from the importing module.
 
 ---
 

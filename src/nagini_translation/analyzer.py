@@ -220,8 +220,16 @@ class Analyzer(ast.NodeVisitor):
                 if len(stmt.names) == 1 and stmt.names[0].name == '*':
                     names = None
                 else:
-                    names = [(name.name, name.asname if name.asname else None)
-                             for name in stmt.names] # TODO rename?
+                    names = []
+                    for name in stmt.names:
+                        if self.types.is_submodule_import(module_name, name.name):
+                            submodule = self.types.files[module_name + '.' + name.name]
+                            self.add_module(os.path.abspath(submodule), abs_path,
+                                            name.asname or name.name, parse_result)
+                        else:
+                            names.append((name.name, name.asname if name.asname else None))
+                    if not names:
+                        continue
                 self.add_module(path, abs_path, None, parse_result, names)
         self.module_index = self.module_paths.index(abs_path) + 1
 
@@ -875,6 +883,9 @@ class Analyzer(ast.NodeVisitor):
                     self.module.ghost_names.add(new_ghost_name)
 
         self.analyze_import(module_name)
+        for name in node.names:
+            if self.types.is_submodule_import(module_name, name.name):
+                self.analyze_import(module_name + '.' + name.name)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         if self.current_function:
