@@ -51,12 +51,20 @@ Additional checks specific to asyncio:
   inside a running loop raises `RuntimeError`.
 - **`create_task` placement.** Only allowed in `async def`, because it needs a
   running loop.
-- **Tasks must be awaited.** A `create_task` call whose result is discarded,
-  or assigned to a local variable that is never awaited, returned, passed to a
-  non-contract function, or stored, is rejected by the analyzer
-  (`asyncio.task.not.awaited`). This is a syntactic check: a variable that is
-  reassigned before being awaited, or a task awaited on only some paths, is not
-  detected.
+- **Tasks must be awaited.** `analyzer_tasks.py` rejects a `create_task`
+  call whose result is discarded (`asyncio.task.not.awaited`). For a task
+  assigned to a local variable, a path-sensitive analysis of the function body
+  tracks which variables may hold a pending task. Awaiting the variable,
+  returning it, passing it to a non-contract function, or storing it ends the
+  obligation. A task must not be pending at a `return`, at an uncaught `raise`,
+  at the end of the function, or when its variable is overwritten. Branches are
+  joined, loops are iterated to a fixpoint (so a task created in one iteration
+  and overwritten in the next is caught), `break`/`continue` flow to the loop
+  exit/head, and a `raise` inside `try` flows to the handlers, which
+  conservatively assume that any task created in the `try` body is pending.
+  Exceptions that are not raised explicitly are not considered, `finally`
+  blocks are not taken into account for `return`s inside the `try`, and aliases
+  of a task (`u = t`) count as handing it on.
 - **Task targets.** Task coroutines (including the arguments of `gather`) must
   not declare exceptions (they would be re-raised by `await t`), must not be
   class methods, must not have keyword or default arguments, and must not
@@ -72,7 +80,8 @@ Additional checks specific to asyncio:
 - **Cancellation is not modelled.** Tasks still pending when the main coroutine
   returns get `CancelledError` at their `await` points. Code that only runs on
   that path, such as `finally` blocks or error handlers, is not verified. Tasks
-  that are never awaited are only rejected by the syntactic check above.
+  that might not be awaited are only rejected by the static analysis above,
+  not by the verifier.
 - **Termination assumes fair cooperative scheduling.** A task that loops
   without awaiting starves the others. `sleep` and awaits of coroutines assume
   that the event loop eventually resumes the current task.
@@ -118,7 +127,8 @@ Additional checks specific to asyncio:
   `async def` to `T`.
 - `analyzer.py`: `AsyncFunctionDef` handling, restrictions, `asyncio` import
   aliases, mapping of `asyncio.Task` to the builtin `Task` class, rejection of
-  coroutine-typed values and of tasks that are never awaited.
+  coroutine-typed values.
+- `analyzer_tasks.py`: check that tasks are awaited on every path.
 - `translators/call.py`: `translate_Await`, `asyncio.run`/`sleep`/
   `create_task`/`gather`, task await; thread object creation is shared between
   threads and tasks.

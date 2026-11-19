@@ -114,10 +114,13 @@ the same result, but its postcondition is not obtained again. Task coroutines mu
 must not declare exceptions (an exception in a task is re-raised when it is
 awaited), and their postconditions must not mention `WaitLevel()`.
 
-Every task must be awaited: a task whose result is discarded, or that is stored
-in a local variable which is never awaited, returned, passed to a function, or
-stored elsewhere, is reported as `Tasks created with asyncio.create_task must be
-awaited.` Uses in contracts and assertions do not count.
+Every task must be awaited on every path: a task whose result is discarded is
+reported as `Tasks created with asyncio.create_task must be awaited.`, and a task
+stored in a local variable must be awaited, returned, passed to a function, or
+stored elsewhere before the function returns, raises an exception, or ends, and
+before the variable is overwritten (also in the next iteration of a loop).
+Otherwise Nagini reports, e.g., `Task t might not be awaited before the return
+in line 12.` Uses in contracts and assertions do not count.
 
 ## Gathering coroutines
 
@@ -181,6 +184,6 @@ Tasks that are still pending when the coroutine passed to `asyncio.run`
 returns are cancelled by asyncio. Nagini does not model cancellation
 (`CancelledError` raised at an `await`), so code that only runs on that path,
 such as `finally` blocks in a cancelled task, is not verified. Nagini rejects
-tasks that are obviously never awaited (see [Tasks](#tasks)), but a task that is
+tasks that might not be awaited (see [Tasks](#tasks)), but a task that is
 handed on is assumed to be awaited by its receiver.
 
