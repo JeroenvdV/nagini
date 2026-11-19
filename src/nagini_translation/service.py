@@ -36,7 +36,7 @@ from nagini_translation.lib.util import (
     UnsupportedException,
 )
 from nagini_translation.main import (
-    load_sil_files,
+    ensure_sil_programs,
     translate,
     TYPE_ERROR_MATCHER,
     verify as verify_program,
@@ -171,9 +171,7 @@ class VerificationService:
         self.jvm = JVM(config.classpath)
         # Preload the Silver resources once (sets the main module's global so
         # translate() reuses it). Tied to the service-level sif/float/bv_size.
-        import nagini_translation.main as main_module
-        main_module.sil_programs = load_sil_files(self.jvm, int_bitops_size, sif,
-                                                  float_encoding)
+        ensure_sil_programs(self.jvm, int_bitops_size, float_encoding)
         if config.use_viper_server:
             try:
                 from nagini_translation.viper_server import get_viper_server_manager
@@ -326,9 +324,8 @@ class VerificationService:
                 self._float_encoding = options['float_encoding']
                 reload_needed = True
             if reload_needed:
-                import nagini_translation.main as main_module
-                main_module.sil_programs = load_sil_files(
-                    self.jvm, self._bv_size, self._sif, self._float_encoding)
+                ensure_sil_programs(self.jvm, self._bv_size, self._float_encoding,
+                                    reload=True)
         return self.current_options()
 
     # -- internals ----------------------------------------------------------
