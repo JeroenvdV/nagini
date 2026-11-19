@@ -13,6 +13,9 @@
 - `return f()` for a function `f` returning `None` crashed Nagini.
 - `--extraction` removed `raise` statements from `@ContractOnly` functions.
 - Counterexamples for tuples with `None` elements crashed Nagini.
+- Thread argument type checks were combined with equality instead of conjunction, so a thread created with two wrongly typed arguments was accepted. This also affects tasks created with `asyncio.create_task` and `asyncio.gather`.
+- `Joinable(...)` and `MayStart(...)` inside `and` expressions were reported as unsupported.
+- A builtin exception class other than `Exception` in `Exsures` crashed Nagini; it is now reported as unsupported.
 
 ---
 
