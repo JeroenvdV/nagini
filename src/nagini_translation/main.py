@@ -111,6 +111,23 @@ def load_sil_files(jvm: JVM, bv_size: int, sif: bool = False, float_option: str 
     return parse_sil_file(os.path.join(resources_path, 'all.sil'), os.path.join(default_path, 'intbv.sil'), bv_size, jvm, float_option)
 
 
+_sil_programs_options = None
+
+
+def ensure_sil_programs(jvm: JVM, bv_size: int, float_encoding: str = None,
+                        reload: bool = False) -> None:
+    """
+    Makes sure the module-global sil_programs holds the Silver resources for
+    the given options, (re)loading them if they are missing, were loaded with
+    different options, or reload is set.
+    """
+    global sil_programs, _sil_programs_options
+    options = (bv_size, float_encoding)
+    if reload or _sil_programs_options != options:
+        sil_programs = load_sil_files(jvm, bv_size, float_option=float_encoding)
+        _sil_programs_options = options
+
+
 def translate(path: str, jvm: JVM, bv_size: int, selected: Set[str] = set(), base_dir: str = None,
               sif: bool = False, arp: bool = False, ignore_global: bool = False,
               reload_resources: bool = False, verbose: bool = False, skip_verification: bool = False,
@@ -164,9 +181,7 @@ def translate(path: str, jvm: JVM, bv_size: int, selected: Set[str] = set(), bas
     if not needs_obligations and config.obligation_config.disable_all is None:
         # only override the default, which is None; if the encoding is forced on or off, it'll be True or False
         config.obligation_config.disable_all = True
-    if 'sil_programs' not in globals() or reload_resources:
-        global sil_programs
-        sil_programs = load_sil_files(jvm, bv_size, sif, float_encoding)
+    ensure_sil_programs(jvm, bv_size, float_encoding, reload=reload_resources)
 
     if extraction:
         program_extractor = ProgramExtractor(modules)
@@ -468,8 +483,7 @@ def main() -> None:
         context = zmq.Context()
         socket = context.socket(zmq.REP)
         socket.bind(DEFAULT_SERVER_SOCKET)
-        global sil_programs
-        sil_programs = load_sil_files(jvm, args.int_bitops_size, args.sif, args.float_encoding)
+        ensure_sil_programs(jvm, args.int_bitops_size, args.float_encoding)
 
         if config.use_viper_server:
             # Start the shared ViperServer once so its cache persists across

@@ -6,6 +6,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 """
 
 
+import os
+
 from abc import ABCMeta
 from enum import Enum
 from typing import List
@@ -16,6 +18,22 @@ from nagini_translation.lib.jvmaccess import (
     JVM
 )
 from nagini_translation.lib.util import list_to_seq
+
+
+MAX_DEFAULT_PARALLEL_VERIFIERS = 4
+
+
+def default_parallel_verifiers_args(viper_args: List[str]) -> List[str]:
+    """Caps Silicon's number of parallel verifiers unless the user set it.
+
+    Silicon defaults to one verifier (and Z3 process) per core, and starts all of
+    them for every verification. For typical Nagini programs that start-up cost
+    outweighs the gain from parallelism beyond a few verifiers.
+    """
+    if any(arg.startswith('--numberOfParallelVerifiers') for arg in viper_args):
+        return []
+    count = min(MAX_DEFAULT_PARALLEL_VERIFIERS, os.cpu_count() or 1)
+    return ['--numberOfParallelVerifiers=' + str(count)]
 
 
 class ViperVerifier(Enum):
@@ -43,6 +61,7 @@ def build_silicon_backend_args(viper_args: List[str], counterexample: bool,
         'viper.silver.plugin.standard.termination.TerminationPlugin:'
         'viper.silver.plugin.standard.predicateinstance.PredicateInstancePlugin',
         *(['--counterexample=native', '--proverArgs=model.partial=true'] if counterexample else []),
+        *default_parallel_verifiers_args(viper_args),
         *viper_args,
     ]
 

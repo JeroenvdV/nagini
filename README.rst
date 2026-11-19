@@ -65,6 +65,8 @@ Execute the following commands (on Windows, you may have to use ``cmd`` and not 
 
         pytest -v -p no:faulthandler src/nagini_translation/tests.py --silicon --minimal
 
+    Larger test suites can be run in parallel across processes by adding ``-n auto``.
+
 Docker Environment
 ==================
 
