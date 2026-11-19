@@ -60,6 +60,7 @@ from nagini_translation.lib.program_nodes import (
     TypeVar,
     UnionType,
 )
+from nagini_translation.lib.resolver import get_asyncio_function
 from nagini_translation.lib.resolver import get_target as do_get_target
 from nagini_translation.lib.typedefs import Expr
 from nagini_translation.lib.typeinfo import TypeInfo
@@ -894,7 +895,60 @@ class Analyzer(ast.NodeVisitor):
                                           'Ghost classes cannot contain async methods.')
         if any(isinstance(n, (ast.Yield, ast.YieldFrom)) for n in ast.walk(node)):
             raise UnsupportedException(node, 'async generators')
+        if not (self.contract_only or self.is_contract_only(node)):
+            module = self.module
+            self.deferred_tasks.append(lambda: self._check_tasks_awaited(node, module))
         self.visit_FunctionDef(node)
+
+    def _check_tasks_awaited(self, node: ast.AsyncFunctionDef,
+                             module: PythonModule) -> None:
+        """
+        Checks that every task created in the given async function is awaited, or
+        handed on (returned, passed to a function or stored), since Nagini does not
+        model the cancellation of tasks that are still pending when the event loop
+        finishes.
+        """
+        parents = {}
+        for parent in ast.walk(node):
+            for child in ast.iter_child_nodes(parent):
+                parents[child] = parent
+        for call in ast.walk(node):
+            if get_asyncio_function(call, module) != 'create_task':
+                continue
+            parent = parents[call]
+            if isinstance(parent, ast.Expr):
+                handed_on = False
+            elif isinstance(parent, ast.Assign) and len(parent.targets) == 1:
+                handed_on = self._is_task_var_handed_on(parent.targets[0], node, parents)
+            elif isinstance(parent, ast.AnnAssign):
+                handed_on = self._is_task_var_handed_on(parent.target, node, parents)
+            else:
+                handed_on = True
+            if not handed_on:
+                raise InvalidProgramException(call, 'asyncio.task.not.awaited',
+                                              'Tasks created with asyncio.create_task '
+                                              'must be awaited.')
+
+    def _is_task_var_handed_on(self, target: ast.expr, func: ast.AsyncFunctionDef,
+                               parents: Dict[ast.AST, ast.AST]) -> bool:
+        if not isinstance(target, ast.Name):
+            return True
+        contract_funcs = set(CONTRACT_FUNCS + CONTRACT_WRAPPER_FUNCS +
+                             OBLIGATION_CONTRACT_FUNCS + ['ThreadPost'])
+        for use in ast.walk(func):
+            if not (isinstance(use, ast.Name) and use.id == target.id and
+                    isinstance(use.ctx, ast.Load)):
+                continue
+            parent = parents[use]
+            if isinstance(parent, ast.keyword):
+                parent = parents[parent]
+            if isinstance(parent, ast.Call):
+                if use is not parent.func and get_func_name(parent) not in contract_funcs:
+                    return True
+            elif isinstance(parent, (ast.Await, ast.Return, ast.Assign, ast.AnnAssign,
+                                     ast.Tuple, ast.List, ast.Set, ast.Dict)):
+                return True
+        return False
 
     def visit_Await(self, node: ast.Await) -> None:
         func = self.current_function

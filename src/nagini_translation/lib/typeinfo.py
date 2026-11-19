@@ -391,6 +391,8 @@ class TypeInfo:
                     relpath = relpath[:-3]
                 elif relpath.endswith('.pyi'):
                     relpath = relpath[:-4]
+                if relpath.endswith('.__init__'):
+                    relpath = relpath[:-len('.__init__')]
                 module_name = relpath
         self.module_name = module_name
         old_find_cache_meta = mypy.build.find_cache_meta

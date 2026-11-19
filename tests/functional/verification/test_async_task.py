@@ -57,11 +57,13 @@ async def task_owns_permission() -> None:
     t = create_task(work(a, 3))
     #:: ExpectedOutput(assignment.failed:insufficient.permission)
     a.val = 5
+    await t
 
 
 async def missing_permission(a: Cell) -> None:
     #:: ExpectedOutput(task.creation.failed:insufficient.permission)
     t = create_task(work(a, 3))
+    await t
 
 
 async def method_task() -> None:

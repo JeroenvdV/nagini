@@ -55,7 +55,7 @@ from nagini_translation.verifier import (
     ViperVerifier
 )
 from nagini_translation import verifier
-from typing import List, Set, Tuple, Union
+from typing import List, Optional, Set, Tuple, Union
 
 
 # Matches a mypy error line. The column and end-position fields are optional:
@@ -111,6 +111,24 @@ def load_sil_files(jvm: JVM, bv_size: int, sif: bool = False, float_option: str 
     return parse_sil_file(os.path.join(resources_path, 'all.sil'), os.path.join(default_path, 'intbv.sil'), bv_size, jvm, float_option)
 
 
+def find_package_root(path: str) -> Optional[str]:
+    """
+    Returns the directory containing the outermost package the module at the given
+    path belongs to, or None if it is not part of a package. Modules in a package
+    are type checked under their full name, which relative imports require.
+    """
+    root = None
+    directory = os.path.dirname(path)
+    while any(os.path.isfile(os.path.join(directory, init))
+              for init in ('__init__.py', '__init__.pyi')):
+        parent = os.path.dirname(directory)
+        root = parent
+        if parent == directory:
+            break
+        directory = parent
+    return root
+
+
 def translate(path: str, jvm: JVM, bv_size: int, selected: Set[str] = set(), base_dir: str = None,
               sif: bool = False, arp: bool = False, ignore_global: bool = False,
               reload_resources: bool = False, verbose: bool = False, skip_verification: bool = False,
@@ -120,6 +138,8 @@ def translate(path: str, jvm: JVM, bv_size: int, selected: Set[str] = set(), bas
     Translates the Python module at the given path to a Viper program
     """
     path = os.path.abspath(path)
+    if base_dir is None:
+        base_dir = find_package_root(path)
     error_manager.clear()
     current_path = os.path.dirname(inspect.stack()[0][1])
     builtins_index_path = os.path.join(current_path, 'resources')
@@ -301,7 +321,8 @@ def main() -> None:
         default=config.mypy_path)
     parser.add_argument(
         '--base-dir',
-        help='base directory',
+        help='base directory; defaults to the directory containing the outermost '
+             'package of the given file',
         default=None)
     parser.add_argument(
         '--print-viper',

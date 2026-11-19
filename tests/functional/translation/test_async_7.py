@@ -19,3 +19,4 @@ async def f(x: int) -> int:
 async def g() -> None:
     #:: ExpectedOutput(unsupported:Task coroutines must not be class methods or raise exceptions and must not mention WaitLevel in their postconditions.)
     t = asyncio.create_task(f(1))
+    await t

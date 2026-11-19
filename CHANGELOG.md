@@ -4,7 +4,7 @@
 
 ### New features
 
-- **async/await**: `async def` functions and methods can now be verified. Awaiting a call of an async function is verified like an ordinary call: the callee's precondition is exhaled and its postcondition inhaled, and all other permissions stay with the caller. `asyncio.run` (in module-level code), `await asyncio.sleep(...)`, tasks created with `asyncio.create_task`, and `await asyncio.gather(...)` of coroutine calls are supported. Tasks are encoded like threads that are started immediately: the task owns the permissions in its coroutine's precondition, and awaiting it works like joining a thread, additionally returning the coroutine's result. `gather` is encoded like creating a task for each coroutine and then awaiting all of them, and returns the tuple of results. The contract functions from `nagini_contracts.thread` and `Level` accept tasks. Holding a lock while a task may be suspended is reported as an error, since it may deadlock the event loop. Coroutine objects that are not awaited directly, `async for`, `async with`, and other `asyncio` functions are reported as unsupported. See [docs/async.md](docs/async.md) and [docs/async-design.md](docs/async-design.md).
+- **async/await**: `async def` functions and methods can now be verified. Awaiting a call of an async function is verified like an ordinary call: the callee's precondition is exhaled and its postcondition inhaled, and all other permissions stay with the caller. `asyncio.run` (in module-level code), `await asyncio.sleep(...)`, tasks created with `asyncio.create_task`, and `await asyncio.gather(...)` of coroutine calls are supported. Tasks are encoded like threads that are started immediately: the task owns the permissions in its coroutine's precondition, and awaiting it works like joining a thread, additionally returning the coroutine's result. `gather` is encoded like creating a task for each coroutine and then awaiting all of them, and returns the tuple of results. The contract functions from `nagini_contracts.thread` and `Level` accept tasks. Holding a lock while a task may be suspended is reported as an error, since it may deadlock the event loop, and so are tasks that are never awaited. Coroutine objects that are not awaited directly, `async for`, `async with`, and other `asyncio` functions are reported as unsupported. See [docs/async.md](docs/async.md) and [docs/async-design.md](docs/async-design.md).
 
 ### Bug fixes
 
@@ -16,6 +16,8 @@
 - Thread argument type checks were combined with equality instead of conjunction, so a thread created with two wrongly typed arguments was accepted. This also affects tasks created with `asyncio.create_task` and `asyncio.gather`.
 - `Joinable(...)` and `MayStart(...)` inside `and` expressions were reported as unsupported.
 - A builtin exception class other than `Exception` in `Exsures` crashed Nagini; it is now reported as unsupported.
+- `--extraction` kept imports which only the removed specifications used.
+- Relative imports between verified modules failed unless `--base-dir` was given. If it is not given, it now defaults to the directory containing the outermost package of the verified file. Verifying the `__init__.py` of a package with a base directory failed as well.
 
 ---
 
