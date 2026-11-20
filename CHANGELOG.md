@@ -74,6 +74,7 @@
 - Updated `mypy` from 0.900 to 1.5.0. (#300)
 - Updated `toposort` from 1.5 to 1.10. (#300)
 - Updated `z3-solver` to 4.16.0.0 on ARM. (#300)
+- `z3-solver` is now 4.16.0.0 on every platform, so all machines use the same Z3. Viper's Silicon, Carbon and ViperServer test with Z3 4.16.0.
 - Updated `pytest` from 7.0.0 to 9.0.3. (#300)
 - Removed `astunparse` and `typed-ast` dependencies. (#300)
 
