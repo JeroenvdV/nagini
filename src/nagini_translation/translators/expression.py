@@ -132,6 +132,8 @@ class ExpressionTranslator(CommonTranslator):
         old_target = self._target_type
         self._target_type = target_type
         stmt, result = self._translate_only(node, ctx, impure)
+        if result is None:
+            result = self.viper.NullLit(self.to_position(node, ctx), self.no_info(ctx))
 
         if target_type != result.typ():
             result = self.convert_to_type(result, target_type, ctx, node)

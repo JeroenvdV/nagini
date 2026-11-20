@@ -22,9 +22,14 @@ from nagini_contracts.io_contracts import (
 )
 from nagini_contracts.obligations import OBLIGATION_CONTRACT_FUNCS
 from nagini_translation.analyzer_io import IOOperationAnalyzer
+from nagini_translation.analyzer_tasks import PendingTaskChecker
 from nagini_translation.external.ast_util import mark_text_ranges
 from nagini_translation.lib.constants import (
+    ASYNC_INCOMPATIBLE_DECORATORS,
+    ASYNCIO_MODULE,
+    ASYNCIO_TASK_TYPE_NAMES,
     CALLABLE_TYPE,
+    COROUTINE_TYPE_NAMES,
     EXTENDABLE_BUILTINS,
     IGNORED_IMPORTS,
     INT_TYPE,
@@ -33,6 +38,7 @@ from nagini_translation.lib.constants import (
     LITERALS,
     MYPY_SUPERCLASSES,
     OBJECT_TYPE,
+    TASK_TYPE,
     TUPLE_TYPE,
 )
 from nagini_translation.lib.program_nodes import (
@@ -145,7 +151,7 @@ class Analyzer(ast.NodeVisitor):
                      else container.static_fields)
         if (name in variables and
                 hasattr(variables[name], 'value') and
-                isinstance(node, (ast.FunctionDef, ast.ClassDef))):
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))):
             raise InvalidProgramException(node, 'multiple.definitions')
         if (name in container.functions or
                 name in container.methods or
@@ -214,8 +220,16 @@ class Analyzer(ast.NodeVisitor):
                 if len(stmt.names) == 1 and stmt.names[0].name == '*':
                     names = None
                 else:
-                    names = [(name.name, name.asname if name.asname else None)
-                             for name in stmt.names] # TODO rename?
+                    names = []
+                    for name in stmt.names:
+                        if self.types.is_submodule_import(module_name, name.name):
+                            submodule = self.types.files[module_name + '.' + name.name]
+                            self.add_module(os.path.abspath(submodule), abs_path,
+                                            name.asname or name.name, parse_result)
+                        else:
+                            names.append((name.name, name.asname if name.asname else None))
+                    if not names:
+                        continue
                 self.add_module(path, abs_path, None, parse_result, names)
         self.module_index = self.module_paths.index(abs_path) + 1
 
@@ -384,7 +398,7 @@ class Analyzer(ast.NodeVisitor):
         if isinstance(node, ast.ClassDef):
             decorators = {d.id for d in node.decorator_list if isinstance(d, ast.Name)}
             return "Ghost" in decorators or 'Predicate' in decorators
-        elif isinstance(node, ast.FunctionDef):
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             decorators = {d.id for d in node.decorator_list if isinstance(d, ast.Name)}
             return in_ghost_class or "Ghost" in decorators or 'Predicate' in decorators
         elif isinstance(node, (ast.arg, ast.AnnAssign)):
@@ -447,7 +461,7 @@ class Analyzer(ast.NodeVisitor):
 
     def visit_Module(self, node: ast.Module) -> None:
         for stmt in node.body:
-            if isinstance(stmt, (ast.ClassDef, ast.FunctionDef, ast.Import,
+            if isinstance(stmt, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef, ast.Import,
                                  ast.ImportFrom, ast.Assign, ast.AnnAssign)):
                 continue
             if (isinstance(stmt, ast.Expr) and
@@ -844,11 +858,18 @@ class Analyzer(ast.NodeVisitor):
 
     def visit_Import(self, node: ast.Import):
         for name in node.names:
+            if name.name == ASYNCIO_MODULE:
+                self.module.asyncio_aliases[name.asname or name.name] = ''
             self.analyze_import(name.name)
 
     def visit_ImportFrom(self, node: ast.ImportFrom):
         module_name = self.module.get_relative_import_name(node.module, node.level)
 
+        if module_name == ASYNCIO_MODULE:
+            for name in node.names:
+                if name.name == '*':
+                    raise UnsupportedException(node, 'import * from asyncio')
+                self.module.asyncio_aliases[name.asname or name.name] = name.name
         if module_name in IGNORED_IMPORTS:
             return
         imp_mod = self.find_module(module_name)
@@ -862,8 +883,48 @@ class Analyzer(ast.NodeVisitor):
                     self.module.ghost_names.add(new_ghost_name)
 
         self.analyze_import(module_name)
+        for name in node.names:
+            if self.types.is_submodule_import(module_name, name.name):
+                self.analyze_import(module_name + '.' + name.name)
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        if self.current_function:
+            raise InvalidProgramException(node, 'nested.function.declaration')
+        decorators = {d.id for d in node.decorator_list if isinstance(d, ast.Name)}
+        illegal = decorators & ASYNC_INCOMPATIBLE_DECORATORS
+        if illegal or any(isinstance(d, ast.Attribute) for d in node.decorator_list):
+            raise InvalidProgramException(node, 'async.decorator.unsupported',
+                                          'Async functions cannot be pure, opaque, '
+                                          'predicates, inlined, IO operations, '
+                                          'properties or ghost functions.')
+        if node.name.startswith('__') and node.name.endswith('__'):
+            raise InvalidProgramException(node, 'async.magic.method',
+                                          'Magic methods such as __aenter__ cannot be '
+                                          'async.')
+        if self.current_class is not None and self.current_class.is_ghost:
+            raise InvalidProgramException(node, 'async.decorator.unsupported',
+                                          'Ghost classes cannot contain async methods.')
+        if any(isinstance(n, (ast.Yield, ast.YieldFrom)) for n in ast.walk(node)):
+            raise UnsupportedException(node, 'async generators')
+        if not (self.contract_only or self.is_contract_only(node)):
+            module = self.module
+            self.deferred_tasks.append(lambda: PendingTaskChecker(node, module).check())
+        self.visit_FunctionDef(node)
+
+    def visit_Await(self, node: ast.Await) -> None:
+        func = self.current_function
+        if func is None or not func.is_async:
+            raise InvalidProgramException(node, 'await.outside.async',
+                                          'await can only be used in async functions.')
+        self.visit_default(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        raise UnsupportedException(node, 'async for')
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        raise UnsupportedException(node, 'async with')
+
+    def visit_FunctionDef(self, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> None:
         if self.current_function:
             raise InvalidProgramException(node, 'nested.function.declaration')
         name = node.name
@@ -914,6 +975,7 @@ class Analyzer(ast.NodeVisitor):
                 container[name].setter = func
             else:
                 container[name] = func
+        func.is_async = isinstance(node, ast.AsyncFunctionDef)
         if self.is_static_method(node):
             func.method_type = MethodType.static_method
         elif self.is_class_method(node):
@@ -1287,7 +1349,10 @@ class Analyzer(ast.NodeVisitor):
             elif node.func.id == 'Exsures':
                 exception = self.get_target(node.args[0], self.module)
                 if not isinstance(exception, PythonClass):
-                    raise UnsupportedException(node.args[0], 'Unsupported exception type.')
+                    raise UnsupportedException(
+                        node.args[0], 'Exsures only supports Exception and user-defined '
+                                      'exception classes but got {}.'.format(
+                                          ast.unparse(node.args[0])))
                 if exception not in self.current_function.declared_exceptions:
                     self.current_function.declared_exceptions[exception] = []
                 self.current_function.declared_exceptions[exception].append(
@@ -1395,7 +1460,7 @@ class Analyzer(ast.NodeVisitor):
             if arg_parent.annotation is node:
                 # We're looking at a parameter type annotation
                 return
-        func_def_parent = get_parent_of_type(node, ast.FunctionDef)
+        func_def_parent = get_parent_of_type(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         if func_def_parent:
             if func_def_parent.returns is node:
                 # We're looking at a return type annotation
@@ -1670,6 +1735,10 @@ class Analyzer(ast.NodeVisitor):
                 self.types.is_none_type(mypy_type)):
             result = None
         elif self.types.is_instance_type(mypy_type):
+            if mypy_type.type.fullname in COROUTINE_TYPE_NAMES:
+                raise UnsupportedException(node, 'Coroutine objects are not supported; '
+                                                 'calls of async functions must be '
+                                                 'awaited directly.')
             result = self.convert_type(mypy_type.type, node)
             if mypy_type.args:
                 args = [self.convert_type(arg, node) for arg in mypy_type.args]
@@ -1748,6 +1817,8 @@ class Analyzer(ast.NodeVisitor):
     def _convert_normal_type(self, mypy_type) -> PythonType:
         prefix = mypy_type._fullname
         name = mypy_type.name
+        if prefix in ASYNCIO_TASK_TYPE_NAMES:
+            return self.module.global_module.classes[TASK_TYPE]
         if prefix == 'builtins.enumerate':
             # We cheat and represent type enumerate as a list of pairs.
             prefix = 'builtins.list'

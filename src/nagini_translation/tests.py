@@ -712,9 +712,32 @@ class ExtractionTest(AnnotatedTest):
                 error, text))
         assert 'nagini_contracts' not in text, (
             'Extracted program still refers to Nagini:\n' + text)
+        unused = _imports_only_used_by_specifications(path, text)
+        assert not unused, (
+            'Extracted program still imports {}:\n{}'.format(', '.join(unused), text))
         errors = _type_check(text, path, base)
         assert not errors, (
             'Extracted program does not type check:\n{}\n{}'.format(errors, text))
+
+
+def _imports_only_used_by_specifications(path: str, text: str) -> List[str]:
+    """Return the names the extracted program imports but no longer uses, although
+    the original program used them."""
+    def used_names(tree: ast.AST) -> Set[str]:
+        return {node.id for node in ast.walk(tree)
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)}
+
+    with open(path) as file:
+        original = ast.parse(file.read())
+    extracted = ast.parse(text)
+    used_before, used_after = used_names(original), used_names(extracted)
+    imported = []
+    for stmt in extracted.body:
+        if isinstance(stmt, ast.Import):
+            imported.extend(alias.asname or alias.name.split('.')[0] for alias in stmt.names)
+        elif isinstance(stmt, ast.ImportFrom):
+            imported.extend(alias.asname or alias.name for alias in stmt.names)
+    return [name for name in imported if name in used_before and name not in used_after]
 
 
 def _type_check(text: str, path: str, base: str) -> str:

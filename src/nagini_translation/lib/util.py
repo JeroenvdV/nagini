@@ -328,7 +328,7 @@ def pprint(node) -> str:
         raise ValueError(node)
     if isinstance(node, str):
         return node
-    if isinstance(node, ast.FunctionDef):
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return "unknown node in function " + node.name
     res = ast.unparse(node)
     res = res.replace('\n', '')
@@ -342,9 +342,9 @@ def get_target_name(node: ast.AST) -> str:
     name. For any other node, the name of the containing function,
     """
     if (not isinstance(node, ast.Call) and
-            not isinstance(node, ast.FunctionDef)):
+            not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))):
         node = get_containing_member(node)
-    if isinstance(node, ast.FunctionDef):
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return node.name
     func = node.func
     if isinstance(func, ast.Name):
@@ -359,7 +359,8 @@ def get_containing_member(node: ast.AST) -> Optional[ast.FunctionDef]:
     Returns the function this node belongs to, if any.
     """
     member = node
-    while not isinstance(member, ast.FunctionDef) and member is not None:
+    while (not isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)) and
+           member is not None):
         if hasattr(member, '_parent'):
             member = member._parent
         else:

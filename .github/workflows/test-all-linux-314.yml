@@ -30,4 +30,4 @@ jobs:
         pip install ".[test]"
     - name: Test with pytest
       run: |
-        pytest -v -p no:faulthandler src/nagini_translation/tests.py --silicon --carbon
+        pytest -v -p no:faulthandler -n auto src/nagini_translation/tests.py --silicon --carbon

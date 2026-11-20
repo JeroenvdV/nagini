@@ -500,6 +500,8 @@ class Converter:
         return res
 
     def convert_value(self, val, t: PythonType, name: str = None):
+        if t is None:
+            return 'None'
         if t.python_class.name.startswith('__prim__'):
             if t.python_class.name == '__prim__int':
                 return self.parse_int(val)

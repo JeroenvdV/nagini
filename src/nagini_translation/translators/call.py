@@ -8,7 +8,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 import ast
 import copy
 from collections import OrderedDict
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from nagini_contracts.contracts import (
     CONTRACT_FUNCS,
@@ -26,6 +26,7 @@ from nagini_translation.lib.constants import (
     ERROR_NAME,
     GET_ARG_FUNC,
     GET_METHOD_FUNC,
+    GET_RESULT_FUNC,
     GET_OLD_FUNC,
     INT_TYPE,
     JOINABLE_FUNC,
@@ -38,6 +39,7 @@ from nagini_translation.lib.constants import (
     RESULT_NAME,
     SET_TYPE,
     STRING_TYPE,
+    TASK_TYPE,
     THREAD_DOMAIN,
     THREAD_POST_PRED,
     THREAD_START_PRED,
@@ -62,6 +64,7 @@ from nagini_translation.lib.program_nodes import (
     chain_if_stmts,
     SilverType,
 )
+from nagini_translation.lib.resolver import get_asyncio_function
 from nagini_translation.lib.typedefs import (
     Expr,
     FuncApp,
@@ -1302,6 +1305,10 @@ class CallTranslator(CommonTranslator):
         Translates a 'normal' function call, i.e., target must refer to a normal function,
         method or predicate.
         """
+        if (isinstance(target, PythonMethod) and target.is_async and
+                ctx.awaited_call is not node):
+            raise UnsupportedException(node, 'Calls of async functions must be '
+                                             'awaited directly.')
         formal_args = []
         name = get_func_name(node)
         position = self.to_position(node, ctx)
@@ -1454,6 +1461,9 @@ class CallTranslator(CommonTranslator):
         elif isinstance(node.func, ast.Call):
             if get_func_name(node.func) == 'IOExists':
                 return self.translate_expr(node.args[0].body, ctx, impure=impure)
+        asyncio_func = get_asyncio_function(node, ctx.module)
+        if asyncio_func is not None:
+            return self._translate_asyncio_call(asyncio_func, node, ctx)
         if self._is_cls_call(node, ctx):
             return self._translate_cls_call(node, ctx)
         elif isinstance(self.get_target(node, ctx), PythonIOOperation):
@@ -1466,6 +1476,286 @@ class CallTranslator(CommonTranslator):
             return self._translate_thread_join(node, ctx)
         else:
             return self.translate_normal_call_node(node, ctx, impure)
+
+    def translate_Await(self, node: ast.Await, ctx: Context, impure=False,
+                        statement=False) -> StmtsAndExpr:
+        """
+        Translates an await expression. Awaiting a coroutine runs it to completion
+        within the current task, so ``await f(args)`` is translated like an ordinary
+        call of ``f``: its precondition is exhaled and its postcondition inhaled.
+        Since the awaiting code keeps all permissions it does not pass to the
+        callee, nothing it holds can be modified by other code that runs while it
+        is suspended.
+        """
+        operand = node.value
+        suspend_stmts = self._check_no_lock_held(node, ctx)
+        asyncio_func = get_asyncio_function(operand, ctx.module)
+        if asyncio_func == 'sleep':
+            stmts, result = self._translate_asyncio_sleep(operand, ctx)
+            return suspend_stmts + stmts, result
+        if asyncio_func == 'gather':
+            stmts, result = self._translate_gather(node, ctx)
+            return suspend_stmts + stmts, result
+        if asyncio_func not in (None, 'create_task'):
+            raise UnsupportedException(operand, 'Unsupported asyncio function: ' +
+                                       asyncio_func)
+        if self._is_task(operand, ctx):
+            stmts, result = self._translate_task_await(node, ctx)
+            return suspend_stmts + stmts, result
+        self._check_coroutine_call(operand, node, ctx)
+        old_awaited = ctx.awaited_call
+        ctx.awaited_call = operand
+        try:
+            stmts, result = self.translate_Call(operand, ctx, impure, statement)
+        finally:
+            ctx.awaited_call = old_awaited
+        return suspend_stmts + stmts, result
+
+    def _is_task(self, node: ast.AST, ctx: Context) -> bool:
+        if isinstance(node, ast.Call):
+            if get_asyncio_function(node, ctx.module) == 'create_task':
+                return True
+            target = self.get_target(node, ctx)
+            if not isinstance(target, PythonMethod) or target.is_async or not target.type:
+                return False
+        node_type = self.get_type(node, ctx)
+        return node_type is not None and node_type.python_class.name == TASK_TYPE
+
+    def _check_no_lock_held(self, node: ast.AST, ctx: Context) -> List[Stmt]:
+        """
+        Creates a check that the current task does not hold any lock when it may be
+        suspended. Since all tasks of an event loop run on the same thread, another
+        task trying to acquire such a lock would block the entire event loop, so the
+        lock would never be released.
+        """
+        pos = self.to_position(node, ctx, rules=rules.AWAIT_LOCK_HELD)
+        info = self.no_info(ctx)
+        check = self.create_no_must_release_check(ctx).translate(self, ctx, pos, info)
+        return [self.viper.Assert(check, pos, info)]
+
+    def _check_coroutine_call(self, operand: ast.AST, node: ast.AST,
+                              ctx: Context) -> PythonMethod:
+        """
+        Checks that the given node is a direct call of an async function or method
+        and returns its target.
+        """
+        target = self.get_target(operand, ctx) if isinstance(operand, ast.Call) else None
+        if not (isinstance(target, PythonMethod) and target.is_async):
+            raise UnsupportedException(node, 'Only direct calls of async functions '
+                                             'can be awaited.')
+        return target
+
+    def _translate_asyncio_call(self, name: str, node: ast.Call,
+                                ctx: Context) -> StmtsAndExpr:
+        if name == 'run':
+            return self._translate_asyncio_run(node, ctx)
+        if name == 'create_task':
+            return self._translate_create_task(node, ctx)
+        if name in ('sleep', 'gather'):
+            raise UnsupportedException(node, 'Coroutines must be awaited directly.')
+        raise UnsupportedException(node, 'Unsupported asyncio function: ' + name)
+
+    def _translate_asyncio_run(self, node: ast.Call, ctx: Context) -> StmtsAndExpr:
+        """
+        Translates ``asyncio.run(f(args))``, which runs the coroutine to completion
+        on a new event loop. Since this fails if an event loop is already running in
+        the current thread, it may only be used in module-level statements, which
+        never execute inside an event loop.
+        """
+        if ctx.current_function is not None and not self.is_main_method(ctx):
+            raise InvalidProgramException(node, 'asyncio.run.not.toplevel',
+                                          'asyncio.run can only be used in '
+                                          'module-level code.')
+        if len(node.args) != 1 or node.keywords:
+            raise UnsupportedException(node, 'asyncio.run with arguments other than '
+                                             'a single coroutine')
+        operand = node.args[0]
+        self._check_coroutine_call(operand, node, ctx)
+        old_awaited = ctx.awaited_call
+        ctx.awaited_call = operand
+        try:
+            return self.translate_Call(operand, ctx)
+        finally:
+            ctx.awaited_call = old_awaited
+
+    def _translate_create_task(self, node: ast.Call, ctx: Context) -> StmtsAndExpr:
+        """
+        Translates ``asyncio.create_task(f(args))``. A task is encoded like a thread
+        that is created and started at once: the precondition of ``f`` is exhaled
+        (the task now owns the respective permissions), and if ``f`` promises to
+        terminate, the creator gets the permission to await the task and obtain its
+        postcondition, just like for joining a thread.
+        """
+        if ctx.sif is True:
+            raise InvalidProgramException(node, 'concurrency.in.sif')
+        if not (ctx.actual_function and ctx.actual_function.is_async):
+            raise InvalidProgramException(node, 'asyncio.create_task.outside.async',
+                                          'asyncio.create_task can only be used '
+                                          'in async functions.')
+        if len(node.args) != 1 or node.keywords:
+            raise UnsupportedException(node, 'asyncio.create_task with arguments other '
+                                             'than a single coroutine')
+        task_type = self.get_type(node, ctx)
+        stmts, task, _ = self._start_task(node.args[0], node, task_type, ctx)
+        return stmts, task
+
+    def _start_task(self, operand: ast.AST, node: ast.AST, task_type: PythonType,
+                    ctx: Context) -> Tuple[List[Stmt], Expr, PythonMethod]:
+        """
+        Creates and starts a task of the given type that runs the coroutine call
+        ``operand``. Returns the statements, the task object and the coroutine's
+        async function or method.
+        """
+        target = self._check_coroutine_call(operand, node, ctx)
+        if operand.keywords:
+            raise UnsupportedException(node, 'Task coroutine with keyword arguments.')
+        if not self._can_be_task_target(target):
+            raise UnsupportedException(node, 'Task coroutines must not be class methods '
+                                             'or raise exceptions and must not mention '
+                                             'WaitLevel in their postconditions.')
+        meth_args = list(operand.args)
+        if isinstance(operand.func, ast.Attribute):
+            receiver = self.get_target(operand.func.value, ctx)
+            if not isinstance(receiver, (PythonType, PythonModule)):
+                meth_args = [operand.func.value] + meth_args
+        if len(meth_args) != len(target.args):
+            raise UnsupportedException(node, 'Task coroutine with default arguments.')
+        ctx.are_threading_constants_used = True
+        info = self.no_info(ctx)
+        stmts, task = self._create_thread_object(node, meth_args, target, task_type,
+                                                 rules.TASK_CREATION_ARG_TYPE, ctx)
+        ctx.current_thread_object, ctx.is_thread_start = task, True
+        precond_pos = self.to_position(node, ctx, rules=rules.TASK_CREATION_PRECONDITION)
+        stmts.extend(self.create_method_fork(ctx, [target], task, precond_pos, info,
+                                             node))
+        ctx.current_thread_object, ctx.is_thread_start = None, False
+        return stmts, task, target
+
+    def _can_be_task_target(self, method: PythonMethod) -> bool:
+        if method.method_type == MethodType.class_method or method.declared_exceptions:
+            return False
+        for post, _ in method.postcondition:
+            for sub_node in ast.walk(post):
+                if isinstance(sub_node, ast.Call) and get_func_name(sub_node) == 'WaitLevel':
+                    return False
+        return True
+
+    def _translate_task_await(self, node: ast.Await, ctx: Context) -> StmtsAndExpr:
+        """
+        Translates awaiting a task, which is encoded like joining a thread whose
+        target can be any async function or method. Additionally, the result of the
+        task's coroutine is returned.
+        """
+        if ctx.sif is True:
+            raise InvalidProgramException(node, 'concurrency.in.sif')
+        stmts, task = self.translate_expr(node.value, ctx)
+        targets = [m for m in ctx.async_methods if self._can_be_task_target(m)]
+        result_type = self.get_type(node, ctx)
+        await_stmts, result = self._await_task(node, task, targets, result_type, ctx)
+        return stmts + await_stmts, result
+
+    def _translate_gather(self, node: ast.Await, ctx: Context) -> StmtsAndExpr:
+        """
+        Translates ``await asyncio.gather(f(args), ...)``, which wraps each coroutine
+        in a task and waits until all of them have completed. This is encoded like
+        creating a task for each coroutine, in order, and then awaiting each of these
+        tasks. Since the coroutine of each task is known, only its postcondition is
+        inhaled. The result is the tuple of the coroutines' results.
+        """
+        call = node.value
+        if ctx.sif is True:
+            raise InvalidProgramException(call, 'concurrency.in.sif')
+        if not call.args or call.keywords:
+            raise UnsupportedException(call, 'asyncio.gather with keyword arguments '
+                                             'or without coroutines')
+        task_class = ctx.module.global_module.classes[TASK_TYPE]
+        result_types = self.get_type(call, ctx).type_args
+        stmts = []
+        tasks = []
+        for arg, result_type in zip(call.args, result_types):
+            task_type = GenericType(task_class, [result_type])
+            arg_stmts, task, target = self._start_task(arg, arg, task_type, ctx)
+            stmts.extend(arg_stmts)
+            tasks.append((arg, task, target))
+        results = []
+        for (arg, task, target), result_type in zip(tasks, result_types):
+            if result_type.name == 'NoneType':
+                result_type = None
+            await_stmts, result = self._await_task(arg, task, [target], result_type,
+                                                   ctx)
+            stmts.extend(await_stmts)
+            results.append(result)
+        return stmts, self.create_tuple(results, result_types, call, ctx)
+
+    def _await_task(self, node: ast.AST, task: Expr, targets: List[PythonMethod],
+                    result_type: Optional[PythonType],
+                    ctx: Context) -> StmtsAndExpr:
+        """
+        Creates statements that await the given task, which is encoded like joining
+        a thread whose target is one of the given async functions or methods, and
+        returns the result of the task's coroutine.
+        """
+        ctx.are_threading_constants_used = True
+        pos, info = self.to_position(node, ctx), self.no_info(ctx)
+        stmts = []
+        ctx.current_thread_object, ctx.is_thread_start = task, False
+
+        joinable_pos = self.to_position(node, ctx, rules=rules.TASK_AWAIT_JOINABLE)
+        joinable_func = self.viper.FuncApp(JOINABLE_FUNC, [task], joinable_pos, info,
+                                           self.viper.Bool)
+        stmts.append(self.viper.Assert(joinable_func, joinable_pos, info))
+
+        wait_level_pos = self.to_position(node, ctx, rules=rules.TASK_AWAIT_WAITLEVEL)
+        task_level = self.create_level_call(sil.RefExpr(task))
+        residue_var = sil.PermVar(ctx.actual_function.obligation_info.residue_level)
+        level_assertion = self.create_level_below(task_level, residue_var, ctx)
+        level_assertion = level_assertion.translate(self, ctx, wait_level_pos, info)
+        if not obligation_config.disable_waitlevel_check:
+            stmts.append(self.viper.Assert(level_assertion, wait_level_pos, info))
+
+        post_pred_acc = self.viper.PredicateAccess([task], THREAD_POST_PRED, pos, info)
+        post_perm = self.viper.CurrentPerm(post_pred_acc, pos, info)
+        any_perm = self.viper.PermGtCmp(post_perm, self.viper.NoPerm(pos, info), pos,
+                                        info)
+        ctx.perm_factor = post_perm
+        object_class = ctx.module.global_module.classes[OBJECT_TYPE]
+        res_var = ctx.current_function.create_variable('await_result',
+                                                      result_type or object_class,
+                                                      self.translator)
+        task_result = self.viper.DomainFuncApp(GET_RESULT_FUNC, [task], self.viper.Ref,
+                                               pos, info, THREAD_DOMAIN)
+        stmts.append(self.viper.LocalVarAssign(res_var.ref(node, ctx), task_result, pos,
+                                               info))
+        if result_type is not None:
+            result_type_check = self.type_check(res_var.ref(node, ctx), result_type, pos,
+                                                ctx)
+            stmts.append(self.viper.Inhale(result_type_check, pos, info))
+        for method in targets:
+            stmts.append(self._inhale_possible_thread_post(method, task, res_var,
+                                                           any_perm, pos, ctx))
+        res_var.type = result_type or object_class
+        ctx.perm_factor = None
+
+        post_pred = self.viper.PredicateAccessPredicate(post_pred_acc, post_perm, pos,
+                                                        info)
+        stmts.append(self.viper.Exhale(post_pred, pos, info))
+        ctx.current_thread_object, ctx.is_thread_start = None, False
+        if result_type is None:
+            return stmts, self.viper.NullLit(pos, info)
+        return stmts, res_var.ref(node, ctx)
+
+    def _translate_asyncio_sleep(self, node: ast.Call, ctx: Context) -> StmtsAndExpr:
+        """
+        Translates ``await asyncio.sleep(delay)``. Suspending the current task does
+        not affect any state it holds permissions to, so this only evaluates the
+        argument.
+        """
+        if len(node.args) != 1 or node.keywords:
+            raise UnsupportedException(node, 'asyncio.sleep with arguments other than '
+                                             'a delay')
+        stmts, _ = self.translate_expr(node.args[0], ctx)
+        pos = self.to_position(node, ctx)
+        return stmts, self.viper.NullLit(pos, self.no_info(ctx))
 
     def _get_arg(self, nargs: int, keywords: List[str], index: int, kw: str) -> int:
         if nargs > index:
@@ -1519,7 +1809,7 @@ class CallTranslator(CommonTranslator):
         target = self.get_target(target_arg, ctx)
         if not isinstance(target, PythonMethod):
             raise InvalidProgramException(node, 'invalid.thread.creation')
-        if target.pure or target.predicate:
+        if target.pure or target.predicate or target.is_async:
             raise InvalidProgramException(node, 'invalid.thread.creation')
         if not isinstance(args_arg, ast.Tuple):
             raise InvalidProgramException(node, 'invalid.thread.creation')
@@ -1549,16 +1839,9 @@ class CallTranslator(CommonTranslator):
 
         thread_arg_stmts, meth_args, target = self._handle_thread_constructor_args(node,
                                                                                    ctx)
-
-        # Create thread object
         thread_class = ctx.module.global_module.classes['Thread']
-        thread_var = ctx.current_function.create_variable('threadingVar', thread_class,
-                                                         self.translator)
-        thread = thread_var.ref(node, ctx)
-        newstmt = self.viper.NewStmt(thread, [], pos, info)
-
-        thread_object_type = self.type_check(thread, thread_class, pos, ctx)
-        inhale_thread_type = self.viper.Inhale(thread_object_type, pos, info)
+        stmts, thread = self._create_thread_object(node, meth_args, target, thread_class,
+                                                   rules.THREAD_CREATION_ARG_TYPE, ctx)
 
         # Inhale MayStart(t)
         start_pred_acc = self.viper.PredicateAccess([thread], THREAD_START_PRED,
@@ -1567,6 +1850,23 @@ class CallTranslator(CommonTranslator):
         start_pred = self.viper.PredicateAccessPredicate(start_pred_acc, full_perm, pos,
                                                          info)
         inhale_start_perm = self.viper.Inhale(start_pred, pos, info)
+        return thread_arg_stmts + stmts + [inhale_start_perm], thread
+
+    def _create_thread_object(self, node: ast.Call, meth_args: List[ast.expr],
+                              target: PythonMethod, thread_class: PythonType,
+                              arg_type_rule: Dict, ctx: Context) -> StmtsAndExpr:
+        """
+        Creates a new object of the given thread class whose target method and
+        arguments are the given ones.
+        """
+        pos, info = self.to_position(node, ctx), self.no_info(ctx)
+        thread_var = ctx.current_function.create_variable('threadingVar', thread_class,
+                                                         self.translator)
+        thread = thread_var.ref(node, ctx)
+        newstmt = self.viper.NewStmt(thread, [], pos, info)
+
+        thread_object_type = self.type_check(thread, thread_class, pos, ctx)
+        inhale_thread_type = self.viper.Inhale(thread_object_type, pos, info)
 
         # Check that given arguments match target method's parameter types,
         # and associate arguments and target method with thread object (by inhaling
@@ -1594,12 +1894,11 @@ class CallTranslator(CommonTranslator):
         inhale_method = self.viper.Inhale(self.viper.EqCmp(thread_method, actual_method,
                                                            pos, info),
                                           pos, info)
-        arg_check_pos = self.to_position(node, ctx, rules=rules.THREAD_CREATION_ARG_TYPE)
+        arg_check_pos = self.to_position(node, ctx, rules=arg_type_rule)
         check_arg_types = self.viper.Assert(arg_type_checks, arg_check_pos, info)
         inhale_args = self.viper.Inhale(arg_assumptions, pos, info)
-        stmts = thread_arg_stmts + arg_stmts + [newstmt, inhale_thread_type,
-                                                inhale_method, check_arg_types,
-                                                inhale_args, inhale_start_perm]
+        stmts = arg_stmts + [newstmt, inhale_thread_type, inhale_method,
+                             check_arg_types, inhale_args]
         return stmts, thread
 
     def _translate_thread_start(self, node: ast.Call,

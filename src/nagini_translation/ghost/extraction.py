@@ -35,9 +35,73 @@ class ProgramExtractor:
         new_body = self._restore_needed_imports(node.body, new_body)
 
         result = self._restore_type_comments(ast.Module(new_body, []))
+        result.body = self._remove_unused_imports(node, result.body)
         # The nodes we created have no position information, which unparsing the
         # result requires.
         return ast.fix_missing_locations(result)
+
+    def _remove_unused_imports(self, original: ast.Module,
+                               body: List[ast.stmt]) -> List[ast.stmt]:
+        """
+        Removes the imported names which only the removed specifications used.
+        Imports which were already unused in the original program are kept, since
+        they may be needed for their side effects or to re-export names.
+        """
+        used_before = self._referenced_names(original)
+        used_after = self._referenced_names(ast.Module(body, []))
+        new_body = []
+        for stmt in body:
+            if (not isinstance(stmt, (ast.Import, ast.ImportFrom)) or
+                    (isinstance(stmt, ast.ImportFrom) and stmt.module == '__future__')):
+                new_body.append(stmt)
+                continue
+            names = [alias for alias in stmt.names
+                     if alias.name == '*' or
+                     self._alias_name(stmt, alias) in used_after or
+                     self._alias_name(stmt, alias) not in used_before]
+            if len(names) == len(stmt.names):
+                new_body.append(stmt)
+            elif names:
+                new_stmt = copy.copy(stmt)
+                new_stmt.names = names
+                new_body.append(new_stmt)
+        return new_body
+
+    def _alias_name(self, node: Union[ast.Import, ast.ImportFrom], alias: ast.alias) -> str:
+        if isinstance(node, ast.Import):
+            return alias.asname or alias.name.split('.')[0]
+        return alias.asname or alias.name
+
+    def _referenced_names(self, module: ast.Module) -> Set[str]:
+        """
+        Returns the names the given module refers to, including names in string
+        annotations and names exported via __all__.
+        """
+        names = set()
+        annotations = []
+        for node in ast.walk(module):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                names.add(node.id)
+            elif isinstance(node, ast.arg) and node.annotation is not None:
+                annotations.append(node.annotation)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.returns:
+                annotations.append(node.returns)
+            elif isinstance(node, ast.AnnAssign):
+                annotations.append(node.annotation)
+            elif (isinstance(node, ast.Assign) and
+                  any(isinstance(t, ast.Name) and t.id == '__all__' for t in node.targets) and
+                  isinstance(node.value, (ast.List, ast.Tuple))):
+                names.update(elt.value for elt in node.value.elts
+                             if isinstance(elt, ast.Constant) and isinstance(elt.value, str))
+        for annotation in annotations:
+            for node in ast.walk(annotation):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    try:
+                        parsed = ast.parse(node.value, mode='eval')
+                    except SyntaxError:
+                        continue
+                    names.update(n.id for n in ast.walk(parsed) if isinstance(n, ast.Name))
+        return names
 
     def _restore_type_comments(self, node: ast.Module) -> ast.Module:
         """
@@ -208,7 +272,13 @@ class ProgramExtractor:
             new_returns = node.returns.slice.elts[0]
 
 
+        if isinstance(node, ast.AsyncFunctionDef):
+            return ast.AsyncFunctionDef(node.name, new_arguments, new_body,
+                                        new_decorator_list, new_returns)
         return ast.FunctionDef(node.name, new_arguments, new_body, new_decorator_list, new_returns)
+
+    def extract_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Optional[ast.AST]:
+        return self.extract_FunctionDef(node)
 
     def extract_Assign(self, node: ast.Assign) -> ast.AST:
         new_targets: List[ast.expr] = []

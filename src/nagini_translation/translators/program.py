@@ -18,6 +18,7 @@ from nagini_translation.lib.constants import (
     FUNCTION_DOMAIN_NAME,
     GET_ARG_FUNC,
     GET_METHOD_FUNC,
+    GET_RESULT_FUNC,
     GET_OLD_FUNC,
     GLOBAL_VAR_FIELD,
     IS_DEFINED_FUNC,
@@ -615,11 +616,13 @@ class ProgramTranslator(CommonTranslator):
                                         self.viper.Ref, False, pos, info, THREAD_DOMAIN)
         get_old = self.viper.DomainFunc(GET_OLD_FUNC, [thread_param, index_param],
                                        self.viper.Ref, False, pos, info, THREAD_DOMAIN)
-        domain = self.viper.Domain(THREAD_DOMAIN, [get_method, get_arg, get_old], [], [],
-                                   pos, info)
+        get_result = self.viper.DomainFunc(GET_RESULT_FUNC, [thread_param],
+                                           self.viper.Ref, False, pos, info, THREAD_DOMAIN)
+        domain_funcs = [get_method, get_arg, get_old, get_result]
+        domain = self.viper.Domain(THREAD_DOMAIN, domain_funcs, [], [], pos, info)
         if isinstance(self.viper, ViperASTExtended):
             getobject(self.jvm.java, self.viper.ast_extensions, 'SIFExtendedTransformer').addDomainFuncToDuplicate(
-                self.viper.to_seq([get_method, get_arg, get_old]))
+                self.viper.to_seq(domain_funcs))
         return domain
 
     def create_definedness_functions(self, ctx: Context) -> List['silver.ast.Function']:
@@ -1378,6 +1381,11 @@ class ProgramTranslator(CommonTranslator):
                     if module is not module.global_module:
                         all_names.append(method.sil_name)
                     self.translate_default_args(method, ctx)
+                    if method.is_async:
+                        ctx.async_methods.append(method)
+                if isinstance(container, PythonClass):
+                    ctx.async_methods.extend(m for m in container.static_methods.values()
+                                             if m.is_async)
                 for pred in container.predicates.values():
                     if module is not module.global_module:
                         all_names.append(pred.sil_name)
@@ -1487,9 +1495,11 @@ class ProgramTranslator(CommonTranslator):
                         predicate_families[cpred] = [pred]
                 ctx.current_class = old_class
 
+        main_method_names = []
         if not ignore_global:
             main_py_method, main_method = self.translate_main_method(modules, ctx)
             methods.append(main_method)
+            main_method_names.append(main_py_method.sil_name)
             self.track_dependencies(selected_names, selected, main_py_method, ctx)
 
         # Translate global variables.
@@ -1539,7 +1549,7 @@ class ProgramTranslator(CommonTranslator):
 
         if not selected:
             selected_names = all_names
-            selected_names.extend(['main'])
+            selected_names.extend(main_method_names)
 
         all_used_names = set(selected_names)
 

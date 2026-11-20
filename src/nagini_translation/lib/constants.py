@@ -80,6 +80,8 @@ GET_OLD_FUNC = 'getOld'
 
 GET_METHOD_FUNC = 'getMethod'
 
+GET_RESULT_FUNC = 'getResult'
+
 GLOBAL_VAR_FIELD = '_val'
 
 NAME_DOMAIN = '_Name'
@@ -122,6 +124,7 @@ INTERNAL_NAMES = [
     GET_ARG_FUNC,
     GET_OLD_FUNC,
     GET_METHOD_FUNC,
+    GET_RESULT_FUNC,
     MAY_SET_PRED,
     IS_DEFINED_FUNC,
     CHECK_DEFINED_FUNC,
@@ -381,8 +384,20 @@ MYPY_SUPERCLASSES = {
 
 EVAL_IO_SIGNATURE = ('eval_io', 'func', 'arg', 'result')
 
+ASYNC_INCOMPATIBLE_DECORATORS = {'Pure', 'Opaque', 'Predicate', 'Inline', 'IOOperation',
+                                 'property', 'Ghost'}
+
+ASYNCIO_MODULE = 'asyncio'
+
+COROUTINE_TYPE_NAMES = {'typing.Coroutine', 'typing.Awaitable'}
+
+TASK_TYPE = 'Task'
+
+ASYNCIO_TASK_TYPE_NAMES = {'asyncio.tasks.Task', '_asyncio.Task', 'asyncio.Task'}
+
 IGNORED_IMPORTS = {'_importlib_modulespec',
                    'abc',
+                   'asyncio',
                    'builtins',
                    'dataclasses',
                    'enum',
@@ -401,6 +416,7 @@ IGNORED_IMPORTS = {'_importlib_modulespec',
 IGNORED_MODULE_NAMES = {
     '_importlib_modulespec': [],
     'abc': [],
+    'asyncio': [],
     'builtins': [],
     'dataclasses': [],
     'enum': [],

@@ -111,6 +111,10 @@ class AbstractTranslator(metaclass=ABCMeta):
                        ctx: Context) -> 'silver.ast.Type':
         return self.config.type_translator.translate_type(cls, ctx)
 
+    def translate_Await(self, node: ast.Await, ctx: Context, impure=False,
+                        statement=False) -> StmtsAndExpr:
+        return self.config.call_translator.translate_Await(node, ctx, impure, statement)
+
     def translate_Call(self, node: ast.Call, ctx: Context, impure=False,
                        statement=False) -> StmtsAndExpr:
         return self.config.call_translator.translate_Call(node, ctx, impure, statement)
@@ -307,6 +311,10 @@ class AbstractTranslator(metaclass=ABCMeta):
         return translator.create_method_call_node(
             ctx, methodname, args, targets, position, info, target_method,
             target_node)
+
+    def create_no_must_release_check(self, ctx: Context) -> sil.BoolExpression:
+        translator = self.config.obligation_translator
+        return translator.create_no_must_release_check(ctx)
 
     def create_method_fork(self, ctx: Context, targets, thread: Expr,
                            position: Position, info: Info,

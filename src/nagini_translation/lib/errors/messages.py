@@ -25,12 +25,12 @@ ERRORS = {
     'call.precondition':
         lambda n: ('The precondition of method {} might not '
                    'hold.'.format(get_target_name(n))
-                   if isinstance(n, (ast.Call, ast.FunctionDef)) else
+                   if isinstance(n, (ast.Call, ast.FunctionDef, ast.AsyncFunctionDef)) else
                    'The precondition of {} might not hold.'.format(pprint(n))),
     'application.precondition':
         lambda n: ('The precondition of function {} might not '
                    'hold.'.format(get_target_name(n))
-                   if isinstance(n, (ast.Call, ast.FunctionDef)) else
+                   if isinstance(n, (ast.Call, ast.FunctionDef, ast.AsyncFunctionDef)) else
                    'The precondition of {} might not hold.'.format(pprint(n))),
     'exhale.failed':
         lambda n: 'Exhale might fail.',
@@ -74,6 +74,10 @@ ERRORS = {
         lambda n: 'Thread start may fail.',
     'thread.join.failed':
         lambda n: 'Thread join may fail.',
+    'task.creation.failed':
+        lambda n: 'Task creation may fail.',
+    'await.failed':
+        lambda n: 'Await may fail.',
     'termination_channel_check.failed':
         lambda n: 'Termination channel might exist.',
     'lock.invariant.not.established':
@@ -154,6 +158,10 @@ REASONS = {
         lambda n: 'Thread level may not be lower than current thread.',
     'thread.not.joinable':
         lambda n: 'Thread may not be joinable.',
+    'task.not.joinable':
+        lambda n: 'Task may not be awaitable, since it might not terminate.',
+    'lock.held':
+        lambda n: 'A lock might be held while suspending the current task.',
     'invalid.argument.type':
         lambda n: 'Thread argument may not fit target method parameter type.',
     'method.not.listed':

@@ -13,6 +13,7 @@ import ast
 from typing import List, Tuple, Union
 
 from nagini_translation.lib import silver_nodes as sil
+from nagini_translation.lib.constants import OBJECT_TYPE
 from nagini_translation.lib.context import Context
 from nagini_translation.lib.jvmaccess import JVM
 from nagini_translation.lib.program_nodes import (
@@ -160,6 +161,18 @@ class ObligationTranslator(CommonTranslator):
 
     def create_level_call(self, expr: sil.RefExpression) -> sil.PermExpression:
         return self._wait_level_translator.create_level_call(expr)
+
+    def create_no_must_release_check(self, ctx: Context) -> sil.BoolExpression:
+        """
+        Creates an assertion that the current method holds no obligation to
+        release a lock.
+        """
+        obligation = self._obligation_manager.must_release_obligation
+        var = ctx.current_function.create_variable(
+            '_r', ctx.module.global_module.classes[OBJECT_TYPE],
+            self.translator, local=False)
+        return sil.BigAnd([sil.ForPerm(var.sil_name, field, sil.FalseLit())
+                           for field in obligation.create_fields_untranslated()])
 
     def create_level_below(
             self, expr: sil.PermExpression,

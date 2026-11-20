@@ -65,6 +65,8 @@ Execute the following commands (on Windows, you may have to use ``cmd`` and not 
 
         pytest -v -p no:faulthandler src/nagini_translation/tests.py --silicon --minimal
 
+    Larger test suites can be run in parallel across processes by adding ``-n auto``.
+
 Docker Environment
 ==================
 
@@ -83,9 +85,10 @@ To verify a specific file from the nagini directory, run::
 
     nagini [OPTIONS] path-to-file.py
 
-You may have to explicitly supply a path to a Z3 executable (use version 4.8.7, other versions may offer significantly worse performance) using the command line parameter ``--z3=path/to/z3``.
+You may have to explicitly supply a path to a Z3 executable (use version 4.16.0, the version that ``pip`` installs and that Viper tests with) using the command line parameter ``--z3=path/to/z3``.
 Additionally, you may have to set the environment variable ``JAVA_HOME`` to point to your Java installation.
 See the `wiki <https://github.com/marcoeilers/nagini/wiki>`_ for information on how to write specifications in Nagini.
+See `docs/async.md <docs/async.md>`_ for verifying ``async``/``await`` code.
 
 
 The following command line options are available::

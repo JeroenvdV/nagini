@@ -5,6 +5,6 @@ from nagini_contracts.contracts import *
 
 
 def f(i: int) -> int:
-    #:: ExpectedOutput(unsupported:Unsupported exception type.)
+    #:: ExpectedOutput(unsupported:Exsures only supports Exception and user-defined exception classes but got ValueError.)
     Exsures(ValueError, True)
     return i
